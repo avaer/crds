@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
-    "big-integer": "^1.6.23"
+    "big-integer": "^1.6.23",
+    "body-parser": "^1.17.2",
+    "eccrypto": "^1.0.3",
+    "express": "^4.15.3"
   },
   "devDependencies": {},
   "scripts": {
