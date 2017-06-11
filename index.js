@@ -11,6 +11,15 @@ const eccrypto = require('eccrypto');
 
 const WORK_TIME = 20;
 
+const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
+const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
+
+const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
+const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+
+const difficulty = 1e5;
+const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
+
 const db = {
   version: '0.0.1',
   balances: {},
@@ -275,15 +284,6 @@ const _commitBlock = (db, mempool, blocks, block) => {
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
 };
 
-const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
-const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
-
-const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
-const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
-
-const difficulty = 1e5;
-const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
-
 class Block {
   constructor(hash, prevHash, timestamp, messages, nonce) {
     this.hash = hash;
@@ -447,7 +447,8 @@ const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privat
 
       return eccrypto.sign(privateKeyBuffer, payloadHash)
         .then(signature => {
-          const message = new Message('send', payload, signature);
+          const signatureString = signature.toString('base64');
+          const message = new Message('send', payload, signatureString);
           mempool.push(message);
         });
     } else {
@@ -564,7 +565,8 @@ const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
-            const message = new Message('mint', payload, signature);
+            const signatureString = signature.toString('base64');
+            const message = new Message('mint', payload, signatureString);
             mempool.push(message);
           });
       };
@@ -574,7 +576,8 @@ const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
-            const message = new Message('mint', payload, signature);
+            const signatureString = signature.toString('base64');
+            const message = new Message('mint', payload, signatureString);
             mempool.push(message);
           });
       };
@@ -623,7 +626,7 @@ app.post('/createMint', bodyParserJson, (req, res, next) => {
   }
 });
 
-const _createCharge = (asset, quantity, srcAddress, dstAddress, timestamp) => {
+const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
   if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
     const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
     const message = new Message('charge', payload, null);
@@ -664,15 +667,20 @@ app.post('/createCharge', bodyParserJson, (req, res, next) => {
   }
 });
 
-const _createChargeback = ({chargeSignature, timestamp, signature}) => {
+const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
   const chargeMessaage = _findChargeMessage(blocks, mempool, chargeSignature);
 
   if (chargeMessaage) {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const payload = JSON.stringify({chargeSignature, timestamp});
-    const message = new Message('chargeback', payload, null);
-    mempool.push(message);
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-    return Promise.resolve();
+    return eccrypto.sign(privateKeyBuffer, payloadHash)
+      .then(signature => {
+        const signatureString = signature.toString('base64');
+        const message = new Message('chargeback', payload, signatureString);
+        mempool.push(message);
+      });
   } else {
     return Promise.reject({
       status: 400,
@@ -687,11 +695,11 @@ app.post('/createChargeback', bodyParserJson, (req, res, next) => {
     body &&
     typeof body.chargeSignature === 'string' &&
     typeof body.timestamp === 'number' &&
-    typeof body.signature === 'string'
+    typeof body.privateKey === 'string'
   ) {
-    const {chargeSignature, timestamp, signature} = body;
+    const {chargeSignature, timestamp, privateKey} = body;
 
-    _createChargeback({chargeSignature, timestamp, signature})
+    _createChargeback({chargeSignature, timestamp, privateKey})
       .then(() => {
         res.json({ok: true});
       })
@@ -726,17 +734,61 @@ const r = repl.start({
         process.stdout.write('> ');
         break;
       }
-      case 'balance': {
-        console.log(JSON.stringify(blocks, null, 2));
+      case 'mempool': {
+        console.log(JSON.stringify(mempool, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
+      case 'balances': {
+        const [, address] = split;
+        const balances = _getConfirmedBalances(db, address);
+        console.log(JSON.stringify(balances, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
+      case 'balances': {
+        const [, address, asset] = split;
+        const balance = _getConfirmedBalance(db, address, asset);
+        console.log(JSON.stringify(balance, null, 2));
         process.stdout.write('> ');
         break;
       }
       case 'send': {
-        const [, asset, quantity, srcAddress, dstAddress, privateKey] = split;
+        const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
+        const quantityNumber = parseInt(quantityString, 10);
+        const timestamp = Date.now();
+
+        _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+        break;
+      }
+      case 'mint': {
+        const [, asset, quantityString, address, privateKey] = split;
+        const quantityNumber = parseInt(quantityString, 10);
+        const timestamp = Date.now();
+
+        _createMint({asset, quantity: quantityNumber, address, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+        break;
+      }
+      case 'charge': {
+        const [, asset, quantity, srcAddress, dstAddress] = split;
         quantity = parseInt(quantity, 10);
         const timestamp = Date.now();
 
-        _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
+        _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
