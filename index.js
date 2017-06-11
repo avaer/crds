@@ -1,5 +1,7 @@
 const http = require('http');
 const crypto = require('crypto');
+const repl = require('repl');
+const replHistory = require('repl.history');
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -7,7 +9,7 @@ const bodyParserJson = bodyParser.json();
 const bigint = require('big-integer');
 const eccrypto = require('eccrypto');
 
-const WORK_TIME = 100;
+const WORK_TIME = 20;
 
 const db = {
   version: '0.0.1',
@@ -268,7 +270,7 @@ const _commitBlock = (db, mempool, blocks, block) => {
 
   blocks.push(block);
 
-  console.log('new db', JSON.stringify(db, null, 2));
+  // console.log('new db', JSON.stringify(db, null, 2));
 
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
 };
@@ -356,7 +358,7 @@ const _recurse = () => {
         const now = Date.now();
         const timeDiff = now - lastBlockTime;
         const timeTaken = timeDiff / 1000;
-        console.log('block', block.hash, timeTaken + 's', Math.floor(numHashes / timeTaken) + ' h/s');
+        // console.log('block', block.hash, timeTaken + 's', Math.floor(numHashes / timeTaken) + ' h/s');
         lastBlockTime = now;
         numHashes = 0;
 
@@ -393,7 +395,7 @@ app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
   res.json({balance});
 });
 
-app.post('/send', bodyParserJson, (req, res, next) => {
+/* app.post('/send', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
   if (
@@ -434,11 +436,35 @@ app.post('/send', bodyParserJson, (req, res, next) => {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
-});
+}); */
+const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privateKey}) => {
+  const privateKeyBuffer = new Buffer(privateKey, 'base64');
+
+  if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
+    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+      const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+      return eccrypto.sign(privateKeyBuffer, payloadHash)
+        .then(signature => {
+          const message = new Message('send', payload, signature);
+          mempool.push(message);
+        });
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'insufficient funds',
+      });
+    }
+  } else {
+    return Promise.reject({
+      status: 400,
+      stack: 'invalid signature',
+    });
+  }
+};
 app.post('/createSend', bodyParserJson, (req, res, next) => {
   const {body} = req;
-
-  console.log('got body', body);
 
   if (
     body &&
@@ -450,38 +476,22 @@ app.post('/createSend', bodyParserJson, (req, res, next) => {
     typeof body.privateKey === 'string'
   ) {
     const {asset, quantity, srcAddress, dstAddress, timestamp, privateKey} = body;
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
 
-    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
-      if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-        const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-        eccrypto.sign(privateKeyBuffer, payloadHash)
-          .then(signature => {
-            const message = new Message('send', payload, signature);
-            mempool.push(message);
-
-            res.json({ok: true});
-          }).catch(err => {
-            res.status(500);
-            res.json({error: err.stack});
-          });
-      } else {
-        res.status(400);
-        res.send({error: 'insufficient funds'});
-      }
-    } else {
-      res.status(400);
-      res.send({error: 'invalid signature'});
-    }
+    _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
+      .then(() => {
+        res.json({ok: true});
+      })
+      .catch(err => {
+        res.status(err.status || 500);
+        res.json({error: err.stack});
+      });
   } else {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
 });
 
-app.post('/mint', bodyParserJson, (req, res, next) => {
+/* app.post('/mint', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
   if (
@@ -538,7 +548,54 @@ app.post('/mint', bodyParserJson, (req, res, next) => {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
-});
+}); */
+const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
+  const privateKeyBuffer = new Buffer(privateKey, 'base64');
+
+  if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === address) {
+    const minter = _getUnconfirmedMinter(db, mempool, asset);
+    const isNewMinter = minter === undefined;
+    const isOldMinter = minter === address;
+
+    if (isNewMinter || isOldMinter) {
+      const _requestMintAsset = () => {
+        const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+        return eccrypto.sign(privateKeyBuffer, payloadHash)
+          .then(signature => {
+            const message = new Message('mint', payload, signature);
+            mempool.push(message);
+          });
+      };
+      const _requestBaseAsset = () => {
+        const payload = JSON.stringify({asset, quantity, address, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+        return eccrypto.sign(privateKeyBuffer, payloadHash)
+          .then(signature => {
+            const message = new Message('mint', payload, signature);
+            mempool.push(message);
+          });
+      };
+
+      return Promise.all([
+        isNewMinter ? _requestMintAsset() : Promise.resolve(),
+        _requestBaseAsset(),
+      ]);
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'address is not minter of this asset',
+      });
+    }
+  } else {
+    return Promise.reject({
+      status: 400,
+      stack: 'invalid signature',
+    });
+  }
+};
 app.post('/createMint', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
@@ -551,60 +608,35 @@ app.post('/createMint', bodyParserJson, (req, res, next) => {
     typeof body.privateKey === 'string'
   ) {
     const {asset, quantity, address, timestamp, privateKey} = body;
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
 
-    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === address) {
-      const minter = _getUnconfirmedMinter(db, mempool, asset);
-      const isNewMinter = minter === undefined;
-      const isOldMinter = minter === address;
-
-      if (isNewMinter || isOldMinter) {
-        const _requestMintAsset = () => {
-          const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
-          const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-          return eccrypto.sign(privateKeyBuffer, payloadHash)
-            .then(signature => {
-              const message = new Message('mint', payload, signature);
-              mempool.push(message);
-            });
-        };
-        const _requestBaseAsset = () => {
-          const payload = JSON.stringify({asset, quantity, address, timestamp});
-          const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-          return eccrypto.sign(privateKeyBuffer, payloadHash)
-            .then(signature => {
-              const message = new Message('mint', payload, signature);
-              mempool.push(message);
-            });
-        };
-
-        Promise.all([
-          isNewMinter ? _requestMintAsset() : Promise.resolve(),
-          _requestBaseAsset(),
-        ])
-          .then(() => {
-            res.json({ok: true});
-          })
-          .catch(err => {
-            res.status(500);
-            res.json({error: err.stack});
-          });
-      } else {
-        res.status(400);
-        res.send({error: 'address is not minter of this asset'});
-      }
-    } else {
-      res.status(400);
-      res.send({error: 'invalid signature'});
-    }
+    _createMint({asset, quantity, address, timestamp, privateKey})
+      .then(() => {
+        res.json({ok: true});
+      })
+      .catch(err => {
+        res.status(err.status || 500);
+        res.json({error: err.stack});
+      });
   } else {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
 });
 
+const _createCharge = (asset, quantity, srcAddress, dstAddress, timestamp) => {
+  if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+    const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+    const message = new Message('charge', payload, null);
+    mempool.push(message);
+
+    return Promise.resolve();
+  } else {
+    return Promise.reject({
+      status: 400,
+      stack: 'insufficient funds',
+    });
+  }
+};
 app.post('/createCharge', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
@@ -618,22 +650,36 @@ app.post('/createCharge', bodyParserJson, (req, res, next) => {
   ) {
     const {asset, quantity, srcAddress, dstAddress, timestamp} = body;
 
-    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-      const message = new Message('charge', payload, null);
-      mempool.push(message);
-
-      res.json({ok: true});
-    } else {
-      res.status(400);
-      res.send({error: 'insufficient funds'});
-    }
+    _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+      .then(() => {
+        res.json({ok: true});
+      })
+      .catch(err => {
+        res.status(err.status || 500);
+        res.json({error: err.stack});
+      });
   } else {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
 });
 
+const _createChargeback = ({chargeSignature, timestamp, signature}) => {
+  const chargeMessaage = _findChargeMessage(blocks, mempool, chargeSignature);
+
+  if (chargeMessaage) {
+    const payload = JSON.stringify({chargeSignature, timestamp});
+    const message = new Message('chargeback', payload, null);
+    mempool.push(message);
+
+    return Promise.resolve();
+  } else {
+    return Promise.reject({
+      status: 400,
+      stack: 'no such charge to chargeback',
+    });
+  }
+};
 app.post('/createChargeback', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
@@ -644,22 +690,72 @@ app.post('/createChargeback', bodyParserJson, (req, res, next) => {
     typeof body.signature === 'string'
   ) {
     const {chargeSignature, timestamp, signature} = body;
-    const chargeMessaage = _findChargeMessage(blocks, mempool, chargeSignature);
 
-    if (chargeMessaage) {
-      const payload = JSON.stringify({chargeSignature, timestamp});
-      const message = new Message('chargeback', payload, null);
-      mempool.push(message);
-
-      res.json({ok: true});
-    } else {
-      res.status(400);
-      res.send({error: 'no such charge to chargeback'});
-    }
+    _createChargeback({chargeSignature, timestamp, signature})
+      .then(() => {
+        res.json({ok: true});
+      })
+      .catch(err => {
+        res.status(err.status || 500);
+        res.json({error: err.stack});
+      });
   } else {
     res.status(400);
     res.send({error: 'invalid parameters'});
   }
 });
 
-http.createServer(app).listen(9999);
+http.createServer(app)
+  .listen(9999);
+
+const r = repl.start({
+  prompt: '> ',
+  terminal: true,
+  eval: (cmd, context, filename, callback) => {
+    const split = cmd.split(/\s/);
+    const command = split[0];
+
+    switch (command) {
+      case 'db': {
+        console.log(JSON.stringify(db, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
+      case 'blocks': {
+        console.log(JSON.stringify(blocks, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
+      case 'balance': {
+        console.log(JSON.stringify(blocks, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
+      case 'send': {
+        const [, asset, quantity, srcAddress, dstAddress, privateKey] = split;
+        quantity = parseInt(quantity, 10);
+        const timestamp = Date.now();
+
+        _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+        break;
+      }
+      default: {
+        callback('invalid command');
+        // process.stdout.write('> ');
+        break;
+      }
+    }
+  },
+});
+replHistory(r, process.env.HOME + '/.hasher_history');
+r.on('exit', () => {
+  console.log();
+  process.exit(0);
+});
