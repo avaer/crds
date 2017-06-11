@@ -11,13 +11,14 @@ const WORK_TIME = 100;
 
 const db = {
   balances: {},
-  minters: {},
+  minters: {
+    'CRD': null,
+  },
 };
 const blocks = [];
 let mempool = [];
 
 const _getConfirmedBalance = (db, address, asset) => {
-console.log('address balances', JSON.stringify(db.balances), address, db.balances[address], asset);
   let balance = (db.balances[address] || {})[asset];
   if (balance === undefined) {
     balance = 0;
@@ -51,6 +52,46 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
   }
 
   return result;
+};
+const _getUnconfirmedMinter = (db, mempool, asset) => {
+  let minter = db.minters[asset];
+
+  const mintMessages = mempool.filter(message =>
+    message.type === 'mint' && message.asset === asset ||
+    message.type === 'send' && message.asset === (asset + ':mint')
+  );
+
+  let done = false;
+  while (mintMessages.length > 0 && !done) {
+    done = true;
+
+    for (let i = 0; i < mintMessages.length; i++) {
+      const mintMessage = mintMessages[i];
+      const {type} = mintMessage;
+
+      if (type === 'mint') {
+        const {address} = mintMessage;
+
+        if (minter === undefined) {
+          minter = address;
+          done = false;
+          mintMessages.splice(i, 1);
+          break;
+        }
+      } else if (type === 'send') {
+        const {srcAddress, dstAddress} = mintMessage;
+
+        if (minter === srcAddress) {
+          minter = dstAddress;
+          mintMessages.splice(i, 1);
+          done = false;
+          break;
+        }
+      }
+    }
+  }
+
+  return minter;
 };
 const _commitBlock = (db, mempool, blocks, block) => {
   const {messages: blockMessages} = block;
@@ -98,6 +139,28 @@ const _commitBlock = (db, mempool, blocks, block) => {
       }
       dstAssetEntry += quantity;
       dstAddressEntry[asset] = dstAssetEntry;
+
+      if (/:mint$/.test(asset)) {
+        db.minters[asset] = dstAddress;
+      }
+    } else if (type === 'mint') {
+      const {asset, quantity, address} = JSON.parse(msg.payload);
+
+      let addressEntry = db.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        db.balances[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry += quantity;
+      addressEntry[asset] = assetEntry;
+
+      if (/:mint$/.test(asset)) {
+        db.minters[asset] = address;
+      }
     }
   }
 
@@ -110,6 +173,9 @@ const _commitBlock = (db, mempool, blocks, block) => {
 
 const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
+
+const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
+const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
 
 const difficulty = 1e5;
 const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
@@ -203,28 +269,50 @@ const _recurse = () => {
 _recurse();
 
 const app = express();
+
 app.get('/balance/:address/:asset', (req, res, next) => {
   const {address, asset} = req.params;
   const balance = _getConfirmedBalance(db, address, asset);
   res.json({balance});
 });
+
 app.post('/send', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
-  if (body && body.asset && body.quantity && body.srcAddress && body.dstAddress && body.timestamp && body.signature) {
+  if (
+    body &&
+    typeof body.asset === 'string' &&
+    typeof body.quantity === 'number' &&
+    typeof body.srcAddress === 'string' &&
+    typeof body.dstAddress === 'string' &&
+    typeof body.timestamp === 'number' &&
+    typeof body.signature === 'string'
+  ) {
     const {asset, quantity, srcAddress, dstAddress, timestamp, signature} = body;
-    const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
 
-    eccrypto.verify(srcAddress, payload, signature)
-      .then(() => {
-        const message = new Message('send', payload, signature);
-        mempool.push(message);
+    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
+      if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+        const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-        res.json({ok: true});
-      }).catch(err => {
-        res.status(500);
-        res.json({error: err.stack});
-      });
+        eccrypto.verify(srcAddress, payloadHash, signature)
+          .then(() => {
+            const message = new Message('send', payload, signature);
+            mempool.push(message);
+
+            res.json({ok: true});
+          }).catch(err => {
+            res.status(500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'insufficient funds'});
+      }
+    } else {
+      res.status(400);
+      res.send({error: 'invalid signature'});
+    }
   } else {
     res.status(400);
     res.send({error: 'invalid parameters'});
@@ -233,15 +321,26 @@ app.post('/send', bodyParserJson, (req, res, next) => {
 app.post('/createSend', bodyParserJson, (req, res, next) => {
   const {body} = req;
 
-  if (body && body.asset && body.quantity && body.srcAddress && body.dstAddress && body.timestamp && body.privateKey) {
+  console.log('got body', body);
+
+  if (
+    body &&
+    typeof body.asset === 'string' &&
+    typeof body.quantity === 'number' &&
+    typeof body.srcAddress === 'string' &&
+    typeof body.dstAddress === 'string' &&
+    typeof body.timestamp === 'number' &&
+    typeof body.privateKey === 'string'
+  ) {
     const {asset, quantity, srcAddress, dstAddress, timestamp, privateKey} = body;
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
 
     if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
       if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
         const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-        eccrypto.sign(privateKeyBuffer, payload)
+        eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
             const message = new Message('send', payload, signature);
             mempool.push(message);
@@ -254,6 +353,92 @@ app.post('/createSend', bodyParserJson, (req, res, next) => {
       } else {
         res.status(400);
         res.send({error: 'insufficient funds'});
+      }
+    } else {
+      res.status(400);
+      res.send({error: 'invalid signature'});
+    }
+  } else {
+    res.status(400);
+    res.send({error: 'invalid parameters'});
+  }
+});
+
+app.post('/mint', bodyParserJson, (req, res, next) => {
+  const {body} = req;
+
+  if (
+    body &&
+    typeof body.asset === 'string' &&
+    typeof body.quantity === 'number' &&
+    typeof body.address === 'string' &&
+    typeof body.timestamp === 'number' &&
+    typeof body.signature === 'string'
+  ) {
+    const {asset, quantity, address, timestamp, signature} = body;
+
+    const minter = _getUnconfirmedMinter(db, mempool, asset);
+    const isNewMinter = minter === undefined;
+    const isOldMinter = minter === address;
+    if (isNewMinter || isOldMinter) {
+      const payload = JSON.stringify({asset, quantity, address, timestamp});
+      const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+      eccrypto.verify(srcAddress, payloadHash, signature)
+        .then(() => {
+          const message = new Message('mint', payload, signature);
+          mempool.push(message);
+
+          res.json({ok: true});
+        }).catch(err => {
+          res.status(500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'address is not minter of this asset'});
+    }
+  } else {
+    res.status(400);
+    res.send({error: 'invalid parameters'});
+  }
+});
+app.post('/createMint', bodyParserJson, (req, res, next) => {
+  const {body} = req;
+
+  if (
+    body &&
+    typeof body.asset === 'string' &&
+    typeof body.quantity === 'number' &&
+    typeof body.address === 'string' &&
+    typeof body.timestamp === 'number' &&
+    typeof body.privateKey === 'string'
+  ) {
+    const {asset, quantity, address, timestamp, privateKey} = body;
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+
+    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === address) {
+      const minter = _getUnconfirmedMinter(db, mempool, asset);
+      const isNewMinter = minter === undefined;
+      const isOldMinter = minter === address;
+
+      if (isNewMinter || isOldMinter) {
+        const payload = JSON.stringify({asset, quantity, address, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+        eccrypto.sign(privateKeyBuffer, payloadHash)
+          .then(signature => {
+            const message = new Message('mint', payload, signature);
+            mempool.push(message);
+
+            res.json({ok: true});
+          }).catch(err => {
+            res.status(500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'address is not minter of this asset'});
       }
     } else {
       res.status(400);
