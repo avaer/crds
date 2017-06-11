@@ -18,12 +18,41 @@ const db = {
 const blocks = [];
 let mempool = [];
 
+const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
 const _getConfirmedBalance = (db, address, asset) => {
   let balance = (db.balances[address] || {})[asset];
   if (balance === undefined) {
     balance = 0;
   }
   return balance;
+};
+const _getUnconfirmedBalances = (db, mempool, address) => {
+  let result = _getConfirmedBalances(db, address);
+
+  for (let i = 0; i < mempool.length; i++) {
+    const msg = mempool[i];
+    const {type} = msg;
+
+    if (type === 'coinbase') {
+      const {asset: a, quantity} = JSON.parse(msg.payload);
+      if (dstAddress === address) {
+        result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+      }
+    } else if (type === 'send') {
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
+        }
+        if (dstAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+        }
+      }
+    }
+  }
+
+  return result;
 };
 const _getUnconfirmedBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
@@ -270,9 +299,24 @@ _recurse();
 
 const app = express();
 
+app.get('/balances/:address', (req, res, next) => {
+  const {address, asset} = req.params;
+  const balance = _getConfirmedBalances(db, address);
+  res.json({balance});
+});
 app.get('/balance/:address/:asset', (req, res, next) => {
   const {address, asset} = req.params;
   const balance = _getConfirmedBalance(db, address, asset);
+  res.json({balance});
+});
+app.get('/unconfirmedBalances/:address', (req, res, next) => {
+  const {address, asset} = req.params;
+  const balance = _getUnconfirmedBalances(db, address);
+  res.json({balance});
+});
+app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
+  const {address, asset} = req.params;
+  const balance = _getUnconfirmedBalance(db, address, asset);
   res.json({balance});
 });
 
@@ -381,16 +425,35 @@ app.post('/mint', bodyParserJson, (req, res, next) => {
     const isNewMinter = minter === undefined;
     const isOldMinter = minter === address;
     if (isNewMinter || isOldMinter) {
-      const payload = JSON.stringify({asset, quantity, address, timestamp});
-      const payloadHash = crypto.createHash('sha256').update(payload).digest();
+      const _requestMintAsset = () => {
+        const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-      eccrypto.verify(srcAddress, payloadHash, signature)
+        return eccrypto.verify(srcAddress, payloadHash, signature)
+          .then(() => {
+            const message = new Message('mint', payload, signature);
+            mempool.push(message);
+          });
+      };
+      const _requestBaseAsset = () => {
+        const payload = JSON.stringify({asset, quantity, address, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+        return eccrypto.verify(srcAddress, payloadHash, signature)
+          .then(() => {
+            const message = new Message('mint', payload, signature);
+            mempool.push(message);
+          });
+      };
+
+      Promise.all([
+        isNewMinter ? _requestMintAsset() : Promise.resolve(),
+        _requestBaseAsset(),
+      ])
         .then(() => {
-          const message = new Message('mint', payload, signature);
-          mempool.push(message);
-
           res.json({ok: true});
-        }).catch(err => {
+        })
+        .catch(err => {
           res.status(500);
           res.json({error: err.stack});
         });
@@ -423,16 +486,35 @@ app.post('/createMint', bodyParserJson, (req, res, next) => {
       const isOldMinter = minter === address;
 
       if (isNewMinter || isOldMinter) {
-        const payload = JSON.stringify({asset, quantity, address, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+        const _requestMintAsset = () => {
+          const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-        eccrypto.sign(privateKeyBuffer, payloadHash)
-          .then(signature => {
-            const message = new Message('mint', payload, signature);
-            mempool.push(message);
+          return eccrypto.sign(privateKeyBuffer, payloadHash)
+            .then(signature => {
+              const message = new Message('mint', payload, signature);
+              mempool.push(message);
+            });
+        };
+        const _requestBaseAsset = () => {
+          const payload = JSON.stringify({asset, quantity, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
+          return eccrypto.sign(privateKeyBuffer, payloadHash)
+            .then(signature => {
+              const message = new Message('mint', payload, signature);
+              mempool.push(message);
+            });
+        };
+
+        Promise.all([
+          isNewMinter ? _requestMintAsset() : Promise.resolve(),
+          _requestBaseAsset(),
+        ])
+          .then(() => {
             res.json({ok: true});
-          }).catch(err => {
+          })
+          .catch(err => {
             res.status(500);
             res.json({error: err.stack});
           });
