@@ -734,6 +734,11 @@ const r = repl.start({
         process.stdout.write('> ');
         break;
       }
+      case 'blockcount': {
+        console.log(JSON.stringify(blocks.length, null, 2));
+        process.stdout.write('> ');
+        break;
+      }
       case 'mempool': {
         console.log(JSON.stringify(mempool, null, 2));
         process.stdout.write('> ');
