@@ -10,6 +10,7 @@ const eccrypto = require('eccrypto');
 const WORK_TIME = 100;
 
 const db = {
+  version: '0.0.1',
   balances: {},
   minters: {
     'CRD': null,
@@ -49,6 +50,17 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
           result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
         }
       }
+    } else if (type === 'charge') {
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
+        }
+        if (dstAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+        }
+      }
     }
   }
 
@@ -77,10 +89,45 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           result += quantity;
         }
       }
+    } else if (type === 'charge') {
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result -= quantity;
+        }
+        if (dstAddress === address) {
+          result += quantity;
+        }
+      }
     }
   }
 
   return result;
+};
+const _findChargeMessage = (blocks, mempool, chargeSignature) => {
+  const _findLocalChargeMessage = (message, signature) => {
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const {type, signature} = message;
+
+      if (message.type === 'charge' && signature === chargeSignature) {
+        return message;
+      }
+    }
+    return null;
+  };
+
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    const {messages} = block;
+    const message = _findLocalChargeMessage(messages, chargeSignature);
+    if (message) {
+      return message;
+    }
+  }
+
+  return _findLocalChargeMessage(messages, mempool);
 };
 const _getUnconfirmedMinter = (db, mempool, asset) => {
   let minter = db.minters[asset];
@@ -172,6 +219,32 @@ const _commitBlock = (db, mempool, blocks, block) => {
       if (/:mint$/.test(asset)) {
         db.minters[asset] = dstAddress;
       }
+    } else if (type === 'charge') { // XXX disallow mint assets here
+      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      let srcAddressEntry = db.balances[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        db.balances[srcAddress] = srcAddressEntry;
+      }
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAssetEntry -= quantity;
+      srcAddressEntry[asset] = srcAssetEntry;
+
+      let dstAddressEntry = db.balances[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
+      }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAssetEntry += quantity;
+      dstAddressEntry[asset] = dstAssetEntry;
     } else if (type === 'mint') {
       const {asset, quantity, address} = JSON.parse(msg.payload);
 
@@ -525,6 +598,63 @@ app.post('/createMint', bodyParserJson, (req, res, next) => {
     } else {
       res.status(400);
       res.send({error: 'invalid signature'});
+    }
+  } else {
+    res.status(400);
+    res.send({error: 'invalid parameters'});
+  }
+});
+
+app.post('/createCharge', bodyParserJson, (req, res, next) => {
+  const {body} = req;
+
+  if (
+    body &&
+    typeof body.asset === 'string' &&
+    typeof body.quantity === 'number' &&
+    typeof body.srcAddress === 'string' &&
+    typeof body.dstAddress === 'string' &&
+    typeof body.timestamp === 'number'
+  ) {
+    const {asset, quantity, srcAddress, dstAddress, timestamp} = body;
+
+    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+      const message = new Message('charge', payload, null);
+      mempool.push(message);
+
+      res.json({ok: true});
+    } else {
+      res.status(400);
+      res.send({error: 'insufficient funds'});
+    }
+  } else {
+    res.status(400);
+    res.send({error: 'invalid parameters'});
+  }
+});
+
+app.post('/createChargeback', bodyParserJson, (req, res, next) => {
+  const {body} = req;
+
+  if (
+    body &&
+    typeof body.chargeSignature === 'string' &&
+    typeof body.timestamp === 'number' &&
+    typeof body.signature === 'string'
+  ) {
+    const {chargeSignature, timestamp, signature} = body;
+    const chargeMessaage = _findChargeMessage(blocks, mempool, chargeSignature);
+
+    if (chargeMessaage) {
+      const payload = JSON.stringify({chargeSignature, timestamp});
+      const message = new Message('chargeback', payload, null);
+      mempool.push(message);
+
+      res.json({ok: true});
+    } else {
+      res.status(400);
+      res.send({error: 'no such charge to chargeback'});
     }
   } else {
     res.status(400);
