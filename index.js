@@ -793,6 +793,19 @@ const _listen = () => {
           process.stdout.write('> ');
           break;
         }
+        case 'minter': {
+          const [, asset] = split;
+          const minter = _getUnconfirmedMinter(db, mempool, asset);
+          console.log(JSON.stringify(minter, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'minters': {
+          const [, asset] = split;
+          console.log(JSON.stringify(db.minters, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
         case 'send': {
           const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
           const quantityNumber = parseInt(quantityString, 10);
