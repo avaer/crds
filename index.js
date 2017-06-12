@@ -13,7 +13,9 @@ const writeFileAtomic = require('write-file-atomic');
 const bigint = require('big-integer');
 const eccrypto = require('eccrypto');
 
+const PORT = 9999;
 const WORK_TIME = 20;
+const CHARGE_SETTLE_BLOCKS = 100;
 
 const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
@@ -640,7 +642,7 @@ const _commitBlock = (db, mempool, block) => {
     const {signature} = chargePayload;
     const chargeBlockIndex = _findChargeBlockIndex(db, signature);
 
-    if (chargeBlockIndex !== -1 && (db.blocks.length - chargeBlockIndex) >= 100) {
+    if (chargeBlockIndex !== -1 && (db.blocks.length - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
 
       let srcAddressEntry = db.balances[srcAddress];
@@ -1220,7 +1222,7 @@ const _listen = () => {
   });
 
   http.createServer(app)
-    .listen(9999);
+    .listen(PORT);
 
   const r = repl.start({
     prompt: '> ',
