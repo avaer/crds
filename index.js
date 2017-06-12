@@ -55,6 +55,76 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
           result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
         }
       }
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedBalance = (db, mempool, address, asset) => {
+  let result = _getConfirmedBalance(db, address, asset);
+
+  for (let i = 0; i < mempool.length; i++) {
+    const msg = mempool[i];
+    const {type} = msg;
+
+    if (type === 'coinbase') {
+      const {asset: a, quantity} = JSON.parse(msg.payload);
+      if (a === asset && dstAddress === address) {
+        result += quantity;
+      }
+    } else if (type === 'send') {
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result -= quantity;
+        }
+        if (dstAddress === address) {
+          result += quantity;
+        }
+      }
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
+  let result = _getConfirmedBalances(db, address);
+
+  for (let i = 0; i < db.charges.length; i++) { // XXX detect chargebacks
+    const charge = db.charges[i];
+    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+    if (a === asset) {
+      if (srcAddress === address) {
+        result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
+      }
+      if (dstAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+      }
+    }
+  }
+
+  for (let i = 0; i < mempool.length; i++) {
+    const msg = mempool[i];
+    const {type} = msg;
+
+    if (type === 'coinbase') {
+      const {asset: a, quantity} = JSON.parse(msg.payload);
+      if (dstAddress === address) {
+        result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+      }
+    } else if (type === 'send') {
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
+        }
+        if (dstAddress === address) {
+          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+        }
+      }
     } else if (type === 'charge') {
       const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
 
@@ -71,8 +141,22 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
 
   return result;
 };
-const _getUnconfirmedBalance = (db, mempool, address, asset) => {
+const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
+
+  for (let i = 0; i < db.charges.length; i++) { // XXX detect chargebacks
+    const charge = db.charges[i];
+    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+    if (a === asset) {
+      if (srcAddress === address) {
+        result -= quantity;
+      }
+      if (dstAddress === address) {
+        result += quantity;
+      }
+    }
+  }
 
   for (let i = 0; i < mempool.length; i++) {
     const msg = mempool[i];
@@ -510,12 +594,12 @@ const _listen = () => {
   });
   app.get('/unconfirmedBalances/:address', (req, res, next) => {
     const {address, asset} = req.params;
-    const balance = _getUnconfirmedBalances(db, address);
+    const balance = _getUnconfirmedUnsettledBalances(db, address);
     res.json({balance});
   });
   app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
-    const balance = _getUnconfirmedBalance(db, address, asset);
+    const balance = _getUnconfirmedUnsettledBalance(db, address, asset);
     res.json({balance});
   });
 
@@ -751,7 +835,7 @@ const _listen = () => {
   });
 
   const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
-    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+    if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
       const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
       const message = new Message('charge', payload, null);
       mempool.push(message);
