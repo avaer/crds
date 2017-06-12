@@ -1,3 +1,5 @@
+const events = require('events');
+const {EventEmitter} = events;
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -10,6 +12,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const bodyParserJson = bodyParser.json();
 const request = require('request');
+const ws = require('ws');
 const writeFileAtomic = require('write-file-atomic');
 const replHistory = require('repl.history');
 const bigint = require('big-integer');
@@ -77,6 +80,7 @@ let db = {
 };
 let mempool = [];
 let peers = [];
+const api = new EventEmitter();
 
 const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
@@ -847,7 +851,15 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
+  // emit the new block to listening peers
+  api.emit('block', block);
+
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
+};
+const _addMessage = message => {
+  messages.push(message);
+
+  api.emit('message', message);
 };
 
 let lastBlockTime = Date.now();
@@ -1397,8 +1409,55 @@ const _listen = () => {
     }
   });
 
-  http.createServer(app)
-    .listen(port);
+  const server = http.createServer(app)
+  const wss = new ws.Server({
+    noServer: true,
+  });
+  const connections = [];
+  wss.on('connection', c => {
+    const {url} = c.upgradeReq;
+
+    if (url === '/listen') {
+      connections.push(c);
+
+      c.on('close', () => {
+        connections.splice(connections.indexOf(connection), 1);
+      });
+    } else {
+      c.close();
+    }
+  });
+  server.on('upgrade', (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, c => {
+      wss.emit('connection', c);
+    });
+  });
+  server.listen(port);
+
+  api.on('block', block => {
+    const e = {
+      type: 'block',
+      block: block,
+    };
+    const es = JSON.stringify(e);
+
+    for (let i = 0; i < connections.length; i++) {
+      const connection = connections[i];
+      connection.send(es);
+    }
+  });
+  api.on('message', message => {
+    const e = {
+      type: 'message',
+      message: message,
+    };
+    const es = JSON.stringify(e);
+
+    for (let i = 0; i < connections.length; i++) {
+      const connection = connections[i];
+      connection.send(es);
+    }
+  });
 
   const r = repl.start({
     prompt: '> ',
@@ -1553,7 +1612,6 @@ const _listen = () => {
         default: {
           console.warn('invalid command');
           process.stdout.write('> ');
-          // process.stdout.write('> ');
           break;
         }
       }
