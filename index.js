@@ -1359,7 +1359,7 @@ const _listen = () => {
     const skip = parseInt(skipString, 10) || 0;
     const limit = parseInt(limitString, 10) || Infinity;
 
-    if ((skip >= (db.blocks.length - 10)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
+    if ((skip >= 0) && (skip >= (db.blocks.length - 10)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
       res.type('application/json');
       res.write('[');
 
@@ -1380,7 +1380,7 @@ const _listen = () => {
 
             _next();
           } else {
-            const rs = fs.createReadStream(path.join(dbPath, `db-${dbIndex}.json`));
+            const rs = fs.createReadStream(path.join(dbPath, `db-${dbIndex + 1}.json`));
             rs.pipe(res, {end: false});
             rs.on('end', () => {
               _next();
@@ -1655,7 +1655,7 @@ const _sync = () => {
 
   _requestBlockCount()
     .then(blockcount => {
-      const skip = blockcount - 10;
+      const skip = Math.max(blockcount - 10, 0);
       const limit = 10;
 
       Promise.all([
@@ -1669,8 +1669,10 @@ const _sync = () => {
           const _saveDbs = () => _ensureDbPath()
             .then(() => _requestSaveDbs(skip, dbs));
           const _saveDb = () => {
-            db = dbs[dbs.length - 1];
-            _decorateDb(db);
+            if (dbs.length > 0) {
+              db = dbs[dbs.length - 1];
+              _decorateDb(db);
+            }
 
             return Promise.resolve();
           };
