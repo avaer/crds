@@ -8,6 +8,7 @@
     "body-parser": "^1.17.2",
     "eccrypto": "^1.0.3",
     "express": "^4.15.3",
+    "mkdirp": "^0.5.1",
     "repl.history": "^0.1.4",
     "write-file-atomic": "^2.1.0"
   },

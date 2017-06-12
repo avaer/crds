@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const repl = require('repl');
 const replHistory = require('repl.history');
 
+const mkdirp = require('mkdirp');
 const express = require('express');
 const bodyParser = require('body-parser');
 const bodyParserJson = bodyParser.json();
@@ -345,7 +346,7 @@ const doHash = () => new Promise((accept, reject) => {
   }
 });
 
-const dbPath = path.join(__dirname, 'db.json');
+const dbPath = path.join(__dirname, 'db');
 let db = {
   version: '0.0.1',
   blocks: [],
@@ -356,14 +357,45 @@ let db = {
 };
 let mempool = [];
 const _load = () => new Promise((accept, reject) => {
-  fs.readFile(dbPath, 'utf8', (err, s) => {
-    if (!err) {
-      const j = JSON.parse(s);
-      db = j;
+  fs.readdir(dbPath, (err, files) => {
+    if (!err || err.code === 'ENOENT') {
+      files = files || [];
 
-      accept();
-    } else if (err.code === 'ENOENT') {
-      accept();
+      const bestFile = (() => {
+        let result = null;
+        let resultHeight = -Infinity;
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const match = file.match(/^db-([0-9]+)\.json$/);
+
+          if (match) {
+            const numBlocks = parseInt(match[1], 10);
+
+            if (numBlocks > resultHeight) {
+              result = file;
+              resultHeight = numBlocks;
+            }
+          }
+        }
+        return result;
+      })();
+
+      if (bestFile) {
+        fs.readFile(path.join(dbPath, bestFile), 'utf8', (err, s) => {
+          if (!err) {
+            const j = JSON.parse(s);
+            db = j;
+
+            accept();
+          } else if (err.code === 'ENOENT') {
+            accept();
+          } else {
+            reject(err);
+          }
+        });
+      } else {
+        accept();
+      }
     } else {
       reject(err);
     }
@@ -373,11 +405,77 @@ const _save = (() => {
   let running = false;
   let queued = false;
 
+  const _ensureDbPath = () => new Promise((accept, reject) => {
+    mkdirp(dbPath, err => {
+      if (!err) {
+        accept();
+      } else {
+        reject(err);
+      }
+    });
+  });
+  const _doSave = cb => {
+    const _removeOldFiles = () => new Promise((accept, reject) => {
+      fs.readdir(dbPath, (err, files) => {
+        if (!err || err.code === 'ENOENT') {
+          files = files || [];
+
+          const keepFiles = [];
+          for (let i = db.blocks.length - 1; i >= db.blocks.length - 10; i--) {
+            keepFiles.push(`db-${i}.json`);
+          }
+
+          const promises = [];
+          const _removeFile = p => new Promise((accept, reject) => {
+            fs.unlink(p, err => {
+              if (!err || err.code === 'ENOENT') {
+                accept();
+              } else {
+                reject(err);
+              }
+            });
+          });
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            if (!keepFiles.includes(file)) {
+              promises.push(_removeFile(path.join(dbPath, file)));
+            }
+          }
+
+          Promise.all(promises)
+            .then(accept)
+            .catch(reject);
+        } else {
+          reject(err);
+        }
+      });
+    });
+    const _writeNewFile = () => new Promise((accept, reject) => {
+      writeFileAtomic(path.join(dbPath, `db-${db.blocks.length}.json`), JSON.stringify(db, null, 2), err => {
+        if (!err) {
+          accept();
+        } else {
+          reject(err);
+        }
+      });
+    });
+
+    _ensureDbPath()
+      .then(() => _removeOldFiles())
+      .then(() => _writeNewFile())
+      .then(() => {
+        cb();
+      })
+      .catch(err => {
+        cb(err);
+      });
+  };
   const _recurse = () => {
     if (!running) {
       running = true;
 
-      writeFileAtomic(dbPath, JSON.stringify(db, null, 2), err => {
+      _doSave(err => {
         if (err) {
           console.warn(err);
         }
