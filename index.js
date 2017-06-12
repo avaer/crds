@@ -1632,37 +1632,6 @@ const _stopMine = () => {
 const _sync = () => {
   const peer = peers[Math.floor(Math.random() * peers.length)];
 
-  /* const _requestMatchingBlockIndex = () => new Promise((accept, reject) => {
-    const skip = Math.max(db.blocks.length - 10, 0);
-    const limit = Math.min(db.blocks.length, 10);
-
-    request(peer + '/blocks?' + querystring.stringify({
-      skip,
-      limit,
-    }), {
-      json: true,
-    }, (err, res, body) => {
-      if (!err) {
-        const {blocks: remoteBlocks} = body;
-        const matchingBlockIndex = (() => {
-          for (let i = 0; i < remoteBlocks.length; i++) {
-            const remoteBlock = remoteBlocks[i];
-            const localBlockIndex = skip + i;
-            const localBlock = db.blocks[localBlockIndex];
-
-            if (remoteBlock.hash !== localBlock.hash) {
-              return i - 1;
-            }
-          }
-          return -1;
-        })();
-
-        accept(matchingBlockIndex);
-      } else {
-        reject(err);
-      }
-    });
-  }); */
   const _requestBlockCount = () => new Promise((accept, reject) => {
     request(peer + '/blockcount', {
       json: true,
@@ -1720,14 +1689,8 @@ const _sync = () => {
     });
   });
 
-  Promise.all([
-    // _requestMatchingBlockIndex(),
-    _requestBlockCount(),
-  ])
-    .then(([
-      // matchingBlockIndex,
-      blockcount,
-    ]) => {
+  _requestBlockCount()
+    .then(blockcount => {
       const skip = blockcount - 10;
       const limit = 10;
 
