@@ -672,15 +672,24 @@ const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
 
   if (chargeMessaage) {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({chargeSignature, timestamp});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const {srcAddress} = JSON.parse(chargeMessaage.payload);
 
-    return eccrypto.sign(privateKeyBuffer, payloadHash)
-      .then(signature => {
-        const signatureString = signature.toString('base64');
-        const message = new Message('chargeback', payload, signatureString);
-        mempool.push(message);
+    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
+      const payload = JSON.stringify({chargeSignature, timestamp});
+      const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+      return eccrypto.sign(privateKeyBuffer, payloadHash)
+        .then(signature => {
+          const signatureString = signature.toString('base64');
+          const message = new Message('chargeback', payload, signatureString);
+          mempool.push(message);
+        });
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'invalid signature',
       });
+    }
   } else {
     return Promise.reject({
       status: 400,
@@ -794,6 +803,20 @@ const r = repl.start({
         const timestamp = Date.now();
 
         _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+        break;
+      }
+      case 'chargeback': {
+        const [, chargeSignature, privateKey] = split;
+        const timestamp = Date.now();
+
+        _createChargeback({chargeSignature, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
