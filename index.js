@@ -856,10 +856,20 @@ const _commitBlock = (db, mempool, block) => {
 
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
 };
-const _addMessage = message => {
-  messages.push(message);
+const _addRemoteBlock = remoteBlock => {
+  console.log('add remote block', remoteBlock); // XXX finish this
+};
+const _addLocalMessage = message => {
+  mempool.push(message);
 
   api.emit('message', message);
+}
+const _addRemoteMessage = remoteMessage => {
+  if (!mempool.some(message => message.equals(remoteMessage))) { // XXX validate the message here
+    mempool.push(remoteMessage);
+
+    api.emit('message', remoteMessage);
+  }
 };
 
 let lastBlockTime = Date.now();
@@ -1092,7 +1102,7 @@ const _listen = () => {
           .then(signature => {
             const signatureString = signature.toString('base64');
             const message = new Message(payload, signatureString);
-            mempool.push(message);
+            _addLocalMessage(message);
           });
       } else {
         return Promise.reject({
@@ -1149,7 +1159,7 @@ const _listen = () => {
           .then(signature => {
             const signatureString = signature.toString('base64');
             const message = new Message(payload, signatureString);
-            mempool.push(message);
+            _addLocalMessage(message);
           });
       } else {
         return Promise.reject({
@@ -1204,7 +1214,7 @@ const _listen = () => {
           .then(signature => {
             const signatureString = signature.toString('base64');
             const message = new Message(payload, signatureString);
-            mempool.push(message);
+            _addLocalMessage(message);
           });
       } else {
         return Promise.reject({
@@ -1250,7 +1260,7 @@ const _listen = () => {
     if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
       const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
       const message = new Message(payload, null);
-      mempool.push(message);
+      _addLocalMessage(message);
 
       return Promise.resolve();
     } else {
@@ -1302,7 +1312,7 @@ const _listen = () => {
           .then(signature => {
             const signatureString = signature.toString('base64');
             const message = new Message(payload, signatureString);
-            mempool.push(message);
+            _addLocalMessage(message);
           });
       } else {
         return Promise.reject({
@@ -1421,7 +1431,7 @@ const _listen = () => {
       connections.push(c);
 
       c.on('close', () => {
-        connections.splice(connections.indexOf(connection), 1);
+        connections.splice(connections.indexOf(c), 1);
       });
     } else {
       c.close();
@@ -1429,6 +1439,8 @@ const _listen = () => {
   });
   server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, c => {
+      c.upgradeReq = req;
+
       wss.emit('connection', c);
     });
   });
@@ -1710,6 +1722,40 @@ const _sync = () => {
       }
     });
   });
+  const _connect = () => {
+    const c = new ws(peer.replace(/^http/, 'ws') + '/listen');
+    c.on('open', () => {
+      console.log('peer connection open', peer);
+
+      c.on('message', s => {
+        const m = JSON.parse(s);
+        const {type} = m;
+
+        switch (type) {
+          case 'block': {
+            const {block} = m;
+            _addRemoteBlock(block);
+            break;
+          }
+          case 'message': {
+            const {message} = m;
+            _addRemoteMessage(message);
+            break;
+          }
+          default: {
+            console.warn('unknown message type:', msg);
+            break;
+          }
+        }
+      });
+      c.on('close', () => {
+        console.log('peer connection closed', peer);
+      });
+    });
+    c.on('error', err => {
+      console.warn(err);
+    });
+  };
 
   _requestBlockCount()
     .then(blockcount => {
@@ -1737,10 +1783,7 @@ const _sync = () => {
           const _saveMempool = () => {
             for (let i = 0; i < remoteMempool.length; i++) {
               const remoteMessage = Message.from(remoteMempool[i]);
-
-              if (!mempool.some(message => message.equals(remoteMessage))) {
-                mempool.push(remoteMessage);
-              }
+              _addRemoteMessage(remoteMessage);
             }
             return Promise.resolve();
           };
@@ -1751,6 +1794,8 @@ const _sync = () => {
             _saveMempool(),
           ])
             .then(() => {
+              _connect();
+
               console.log('synced'); // XXX
             })
             .catch(err => {
