@@ -45,6 +45,10 @@ class Block {
     const {hash, prevHash, timestamp, messages, nonce} = o;
     return new Block(hash, prevHash, timestamp, messages, nonce);
   }
+
+  equals(block) {
+    return this.hash === block.hash;
+  }
 }
 class Message {
   constructor(type, payload, signature) {
@@ -56,6 +60,10 @@ class Message {
   static from(o) {
     const {type, payload, signature} = o;
     return new Message(type, payload, signature);
+  }
+
+  equals(message) {
+    return this.signature === message.signature;
   }
 }
 
@@ -886,6 +894,10 @@ const doHash = () => new Promise((accept, reject) => {
 });
 
 const dbPath = path.join(__dirname, dataDirectory);
+const _decorateDb = db => {
+  db.blocks = db.blocks.map(b => Block.from(b));
+  db.charges = db.charges.map(b => Message.from(b));
+};
 const _load = () => new Promise((accept, reject) => {
   fs.readdir(dbPath, (err, files) => {
     if (!err || err.code === 'ENOENT') {
@@ -915,8 +927,7 @@ const _load = () => new Promise((accept, reject) => {
           if (!err) {
             const j = JSON.parse(s);
             db = j;
-            db.blocks = db.blocks.map(b => Block.from(b));
-            db.charges = db.charges.map(b => Message.from(b));
+            _decorateDb(db);
 
             accept();
           } else if (err.code === 'ENOENT') {
@@ -933,19 +944,19 @@ const _load = () => new Promise((accept, reject) => {
     }
   });
 });
+const _ensureDbPath = () => new Promise((accept, reject) => {
+  mkdirp(dbPath, err => {
+    if (!err) {
+      accept();
+    } else {
+      reject(err);
+    }
+  });
+});
 const _save = (() => {
   let running = false;
   let queued = false;
 
-  const _ensureDbPath = () => new Promise((accept, reject) => {
-    mkdirp(dbPath, err => {
-      if (!err) {
-        accept();
-      } else {
-        reject(err);
-      }
-    });
-  });
   const _doSave = cb => {
     const _removeOldFiles = () => new Promise((accept, reject) => {
       fs.readdir(dbPath, (err, files) => {
@@ -1621,7 +1632,7 @@ const _stopMine = () => {
 const _sync = () => {
   const peer = peers[Math.floor(Math.random() * peers.length)];
 
-  const _requestMatchingBlockIndex = () => new Promise((accept, reject) => {
+  /* const _requestMatchingBlockIndex = () => new Promise((accept, reject) => {
     const skip = Math.max(db.blocks.length - 10, 0);
     const limit = Math.min(db.blocks.length, 10);
 
@@ -1651,7 +1662,7 @@ const _sync = () => {
         reject(err);
       }
     });
-  });
+  }); */
   const _requestBlockCount = () => new Promise((accept, reject) => {
     request(peer + '/blockcount', {
       json: true,
@@ -1664,27 +1675,101 @@ const _sync = () => {
       }
     });
   });
+  const _requestSaveDb = (height, db) => new Promise((accept, reject) => {
+    writeFileAtomic(path.join(dbPath, `db-${height}.json`), JSON.stringify(db, null, 2), err => {
+      if (!err) {
+        accept();
+      } else {
+        reject(err);
+      }
+    });
+  });
+  const _requestSaveDbs = (height, dbs) => {
+    const promises = [];
+    for (let i = 0; i < dbs.length; i++) {
+      const db = dbs[i];
+      promises.push(_requestSaveDb(height + i, db));
+    }
+    return Promise.all(promises);
+  };
+  const _requestDbs = ({skip, limit}) => new Promise((accept, reject) => {
+    request(peer + '/db?' + querystring.stringify({
+      skip,
+      limit,
+    }), {
+      json: true,
+    }, (err, res, body) => {
+      if (!err) {
+        const dbs = body;
+        accept(dbs);
+      } else {
+        reject(err);
+      }
+    });
+  });
+  const _requestMempool = () => new Promise((accept, reject) => {
+    request(peer + '/mempool', {
+      json: true,
+    }, (err, res, body) => {
+      if (!err) {
+        const mempool = body;
+        accept(mempool);
+      } else {
+        reject(err);
+      }
+    });
+  });
 
   Promise.all([
-    _requestMatchingBlockIndex(),
+    // _requestMatchingBlockIndex(),
     _requestBlockCount(),
   ])
     .then(([
-      matchingBlockIndex,
+      // matchingBlockIndex,
       blockcount,
     ]) => {
-      request(peer + '/db?' + querystring.stringify({
-        skip: blockcount - 10,
-        limit: 10,
-      }), {
-        json: true,
-      }, (err, res, body) => {
-        if (!err) {
-          console.log('got dbs', body);
-        } else {
-          console.warn(err);
-        }
-      });
+      const skip = blockcount - 10;
+      const limit = 10;
+
+      Promise.all([
+        _requestDbs({skip, limit}),
+        _requestMempool(),
+      ])
+        .then(([
+          dbs,
+          remoteMempool,
+        ]) => {
+          const _saveDbs = () => _ensureDbPath()
+            .then(() => _requestSaveDbs(skip, dbs));
+          const _saveDb = () => {
+            db = dbs[dbs.length - 1];
+            _decorateDb(db);
+
+            return Promise.resolve();
+          };
+          const _saveMempool = () => {
+            for (let i = 0; i < remoteMempool.length; i++) {
+              const remoteMessage = Message.from(remoteMempool[i]);
+
+              if (!mempool.some(message => message.equals(remoteMessage))) {
+                mempool.push(remoteMessage);
+              }
+            }
+            return Promise.resolve();
+          };
+
+          Promise.all([
+            _saveDbs(),
+            _saveDb(),
+            _saveMempool(),
+          ])
+            .then(() => {
+              console.log('synced'); // XXX
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+        })
   });
 };
 
