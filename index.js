@@ -1231,6 +1231,20 @@ const _listen = () => {
             });
           break;
         }
+        case 'minter': {
+          const [, address, asset, privateKey] = split;
+          const timestamp = Date.now();
+
+          _createMinter({address, asset, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
         case 'mint': {
           const [, asset, quantityString, address, privateKey] = split;
           const quantityNumber = parseInt(quantityString, 10);
