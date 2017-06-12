@@ -562,6 +562,8 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 };
 const _commitBlock = (db, mempool, block) => {
   const {messages: blockMessages} = block;
+
+  // update balances
   for (let i = 0; i < blockMessages.length; i++) {
     const msg = blockMessages[i];
     const {type} = msg;
@@ -657,6 +659,7 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
+  // add blocks
   db.blocks.push(block);
 
   // add new charges
