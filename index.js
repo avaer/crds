@@ -52,6 +52,25 @@ class Block {
   equals(block) {
     return this.hash === block.hash;
   }
+
+  verify() {
+    const {hash, prevHash, messages} = this;
+
+    const _checkHash = () => {
+      return Promise.resolve(); // XXX check that the hash is difficult enough
+    };
+    const _checkPreviousBlock = () => {
+      return Promise.resolve(); // XXX match to previous block
+    };
+    const _checkMessages = () => Promise.all(messages.map(message => message.verify({block: this})));
+
+    return Promise.all([
+      _checkHash(),
+      _checkPreviousBlock(),
+      _checkMessages(),
+    ])
+      .then(() => {});
+  }
 }
 class Message {
   constructor(payload, signature) {
