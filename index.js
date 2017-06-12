@@ -22,12 +22,12 @@ const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 const db = {
   version: '0.0.1',
+  blocks: [],
   balances: {},
   minters: {
     'CRD': null,
   },
 };
-const blocks = [];
 let mempool = [];
 
 const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
@@ -116,7 +116,7 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _findChargeMessage = (blocks, mempool, chargeSignature) => {
+const _findChargeMessage = (db, mempool, chargeSignature) => {
   const _findLocalChargeMessage = (message, signature) => {
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
@@ -129,6 +129,7 @@ const _findChargeMessage = (blocks, mempool, chargeSignature) => {
     return null;
   };
 
+  const {blocks} = db;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
@@ -180,7 +181,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
   return minter;
 };
-const _commitBlock = (db, mempool, blocks, block) => {
+const _commitBlock = (db, mempool, block) => {
   const {messages: blockMessages} = block;
   for (let i = 0; i < blockMessages.length; i++) {
     const msg = blockMessages[i];
@@ -277,7 +278,7 @@ const _commitBlock = (db, mempool, blocks, block) => {
     }
   }
 
-  blocks.push(block);
+  db.blocks.push(block);
 
   // console.log('new db', JSON.stringify(db, null, 2));
 
@@ -306,7 +307,7 @@ let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
   const start = Date.now();
   const startString = String(start);
-  const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : bigint(0).toString(16);
+  const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
   const coinbaseMessage = new Message('coinbase', JSON.stringify({asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
   const blockMessages = mempool.concat(coinbaseMessage);
   const blockMessagesJson = blockMessages
@@ -362,7 +363,7 @@ const _recurse = () => {
         lastBlockTime = now;
         numHashes = 0;
 
-        mempool = _commitBlock(db, mempool, blocks, block);
+        mempool = _commitBlock(db, mempool, block);
       } /* else {
         console.log('no block yet');
       } */
@@ -668,7 +669,7 @@ app.post('/createCharge', bodyParserJson, (req, res, next) => {
 });
 
 const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
-  const chargeMessaage = _findChargeMessage(blocks, mempool, chargeSignature);
+  const chargeMessaage = _findChargeMessage(db, mempool, chargeSignature);
 
   if (chargeMessaage) {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
@@ -739,12 +740,12 @@ const r = repl.start({
         break;
       }
       case 'blocks': {
-        console.log(JSON.stringify(blocks, null, 2));
+        console.log(JSON.stringify(db.blocks, null, 2));
         process.stdout.write('> ');
         break;
       }
       case 'blockcount': {
-        console.log(JSON.stringify(blocks.length, null, 2));
+        console.log(JSON.stringify(db.blocks.length, null, 2));
         process.stdout.write('> ');
         break;
       }
