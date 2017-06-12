@@ -26,7 +26,7 @@ class Block {
     this.nonce = nonce;
   }
 
-  from(o) {
+  static from(o) {
     const {hash, prevHash, timestamp, messages, nonce} = o;
     return new Block(hash, prevHash, timestamp, messages, nonce);
   }
@@ -38,7 +38,7 @@ class Message {
     this.signature = signature;
   }
 
-  from(o) {
+  static from(o) {
     const {type, payload, signature} = o;
     return new Message(type, payload, signature);
   }
