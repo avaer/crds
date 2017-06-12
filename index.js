@@ -282,24 +282,36 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _findChargeMessage = (db, mempool, chargeSignature) => {
-  const _findLocalChargeMessage = (message, signature) => {
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      const {type, signature} = message;
+const _findChargeBlockIndex = (db, chargeSignature) => {
+  for (let i = db.blocks.length - 1; i >= 0; i--) {
+    const block = db.blocks[i];
+    const {messages} = block;
+    const chargeMessage = _findLocalChargeMessage(messages, chargeSignature);
 
-      if (message.type === 'charge' && signature === chargeSignature) {
-        return message;
-      }
+    if (chargeMessage) {
+      return i;
     }
-    return null;
-  };
+  }
+  return -1;
+};
+const _findLocalChargeMessage = (messages, signature) => {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    const {type, signature} = message;
 
+    if (message.type === 'charge' && signature === chargeSignature) {
+      return message;
+    }
+  }
+  return null;
+};
+const _findChargeMessage = (db, mempool, chargeSignature) => {
   const {blocks} = db;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
     const message = _findLocalChargeMessage(messages, chargeSignature);
+
     if (message) {
       return message;
     }
@@ -607,8 +619,57 @@ const _commitBlock = (db, mempool, block) => {
 
   db.blocks.push(block);
 
-  // XXX commit charges
-  // XXX resolve chargebacks
+  // add new charges
+  for (let i = 0; i < blockMessages.length; i++) {
+    const msg = blockMessages[i];
+    const {type} = msg;
+
+    if (type === 'charge') {
+      db.charges.push(msg);
+    }
+  }
+
+  // apply charegebacks
+  // XXX finish this
+
+  // settle charges
+  const oldCharges = db.charges.slice();
+  for (let i = 0; i < oldCharges.length; i++) {
+    const charge = oldCharges[i];
+    const chargePayload = JSON.parse(charge.payload);
+    const {signature} = chargePayload;
+    const chargeBlockIndex = _findChargeBlockIndex(db, signature);
+
+    if (chargeBlockIndex !== -1 && (db.blocks.length - chargeBlockIndex) >= 100) {
+      const {asset, quantity, srcAddress, dstAddress} = chargePayload;
+
+      let srcAddressEntry = db.balances[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        db.balances[srcAddress] = srcAddressEntry;
+      }
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAssetEntry -= quantity;
+      srcAddressEntry[asset] = srcAssetEntry;
+
+      let dstAddressEntry = db.balances[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
+      }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAssetEntry += quantity;
+      dstAddressEntry[asset] = dstAssetEntry;
+
+      db.charges.splice(db.charges.indexOf(charge), 1);
+    }
+  }
 
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
 };
