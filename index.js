@@ -43,7 +43,7 @@ class Block {
 
   static from(o) {
     const {hash, prevHash, timestamp, messages, nonce} = o;
-    return new Block(hash, prevHash, timestamp, messages, nonce);
+    return new Block(hash, prevHash, timestamp, messages.map(message => Message.from(message)), nonce);
   }
 
   equals(block) {
@@ -51,15 +51,14 @@ class Block {
   }
 }
 class Message {
-  constructor(type, payload, signature) {
-    this.type = type;
+  constructor(payload, signature) {
     this.payload = payload;
     this.signature = signature;
   }
 
   static from(o) {
-    const {type, payload, signature} = o;
-    return new Message(type, payload, signature);
+    const {payload, signature} = o;
+    return new Message(payload, signature);
   }
 
   equals(message) {
@@ -100,11 +99,12 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
   let result = _getConfirmedBalances(db, address);
 
   for (let i = 0; i < mempool.length; i++) {
-    const msg = mempool[i];
-    const {type} = msg;
+    const message = mempool[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset, quantity, address} = JSON.parse(msg.payload);
+      const {asset, quantity, address} = payloadJson;
       let dstAddressEntry = db.balances[address];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
@@ -116,7 +116,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'send') {
-      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = db.balances[srcAddress];
       if (srcAddressEntry === undefined){
@@ -140,7 +140,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'minter') {
-      const {address, asset} = JSON.parse(msg.payload);
+      const {address, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
       let addressEntry = db.balances[address];
@@ -163,16 +163,17 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
 
   for (let i = 0; i < mempool.length; i++) {
-    const msg = mempool[i];
-    const {type} = msg;
+    const message = mempool[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = JSON.parse(msg.payload);
+      const {asset: a, quantity} = payloadJson;
       if (a === asset && dstAddress === address) {
         result += quantity;
       }
     } else if (type === 'send') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
@@ -183,7 +184,7 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'mint') {
-      const {address: mintAddress, asset} = JSON.parse(msg.payload);
+      const {address: mintAddress, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
       if (mintAsset === asset && mintAddress === address) {
@@ -198,11 +199,12 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
   let result = _getConfirmedBalances(db, address);
 
   for (let i = 0; i < mempool.length; i++) {
-    const msg = mempool[i];
-    const {type} = msg;
+    const message = mempool[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity, address} = JSON.parse(msg.payload);
+      const {asset: a, quantity, address} = payloadJson;
       let dstAddressEntry = db.balances[address];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
@@ -214,7 +216,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'send') {
-      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = db.balances[srcAddress];
       if (srcAddressEntry === undefined){
@@ -238,7 +240,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'minter') {
-      const {address, asset} = JSON.parse(msg.payload);
+      const {address, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
       let addressEntry = db.balances[address];
@@ -289,16 +291,17 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
 
   for (let i = 0; i < mempool.length; i++) {
-    const msg = mempool[i];
-    const {type} = msg;
+    const message = mempool[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = JSON.parse(msg.payload);
+      const {asset: a, quantity} = payloadJson;
       if (a === asset && dstAddress === address) {
         result += quantity;
       }
     } else if (type === 'send') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
@@ -309,7 +312,7 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'charge') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
@@ -320,7 +323,7 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'mint') {
-      const {address: mintAddress, asset} = JSON.parse(msg.payload);
+      const {address: mintAddress, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
       if (mintAsset === asset && mintAddress === address) {
@@ -361,9 +364,11 @@ const _findChargeBlockIndex = (db, chargeSignature) => {
 const _findLocalChargeMessage = (messages, signature) => {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    const {type, signature} = message;
+    const {payload, signature} = message;
+    const payloadJson = JSON.parse(payload);
+    const {type} = payloadJson;
 
-    if (message.type === 'charge' && signature === chargeSignature) {
+    if (type === 'charge' && signature === chargeSignature) {
       return message;
     }
   }
@@ -674,11 +679,12 @@ const _commitBlock = (db, mempool, block) => {
 
   // update balances
   for (let i = 0; i < blockMessages.length; i++) {
-    const msg = blockMessages[i];
-    const {type} = msg;
+    const message = blockMessages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset, quantity, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, dstAddress} = payloadJson;
 
       let dstAddressEntry = db.balances[dstAddress];
       if (dstAddressEntry === undefined){
@@ -692,7 +698,7 @@ const _commitBlock = (db, mempool, block) => {
       dstAssetEntry += quantity;
       dstAddressEntry[asset] = dstAssetEntry;
     } else if (type === 'send') {
-      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = db.balances[srcAddress];
       if (srcAddressEntry === undefined){
@@ -722,7 +728,7 @@ const _commitBlock = (db, mempool, block) => {
         db.minters[asset] = dstAddress;
       }
     } else if (type === 'charge') { // XXX disallow mint assets here
-      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = db.balances[srcAddress];
       if (srcAddressEntry === undefined){
@@ -748,7 +754,7 @@ const _commitBlock = (db, mempool, block) => {
       dstAssetEntry += quantity;
       dstAddressEntry[asset] = dstAssetEntry;
     } else if (type === 'minter') {
-      const {asset, address} = JSON.parse(msg.payload);
+      const {asset, address} = payloadJson;
       const mintAsset = asset + ':mint';
 
       let addressEntry = db.balances[address];
@@ -765,7 +771,7 @@ const _commitBlock = (db, mempool, block) => {
 
       db.minters[asset] = address;
     } else if (type === 'mint') {
-      const {asset, quantity, address} = JSON.parse(msg.payload);
+      const {asset, quantity, address} = payloadJson;
 
       let addressEntry = db.balances[address];
       if (addressEntry === undefined){
@@ -786,11 +792,12 @@ const _commitBlock = (db, mempool, block) => {
 
   // add new charges
   for (let i = 0; i < blockMessages.length; i++) {
-    const msg = blockMessages[i];
-    const {type} = msg;
+    const message = blockMessages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
 
     if (type === 'charge') {
-      db.charges.push(msg);
+      db.charges.push(message);
     }
   }
 
@@ -849,7 +856,7 @@ const doHash = () => new Promise((accept, reject) => {
   const start = Date.now();
   const startString = String(start);
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
-  const coinbaseMessage = new Message('coinbase', JSON.stringify({asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
+  const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
   const blockMessages = mempool.concat(coinbaseMessage);
   const blockMessagesJson = blockMessages
     .map(message => JSON.stringify(message))
@@ -862,7 +869,6 @@ const doHash = () => new Promise((accept, reject) => {
     hash.update(startString);
     hash.update(':');
     hash.update(blockMessagesJson);
-    // hash.update(':');
     return hash.digest();
   })();
 
@@ -1062,60 +1068,18 @@ const _listen = () => {
     res.json({balance});
   });
 
-  /* app.post('/send', bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.asset === 'string' &&
-      typeof body.quantity === 'number' &&
-      typeof body.srcAddress === 'string' &&
-      typeof body.dstAddress === 'string' &&
-      typeof body.timestamp === 'number' &&
-      typeof body.signature === 'string'
-    ) {
-      const {asset, quantity, srcAddress, dstAddress, timestamp, signature} = body;
-
-      if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
-        if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-          const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-          const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-          eccrypto.verify(srcAddress, payloadHash, signature)
-            .then(() => {
-              const message = new Message('send', payload, signature);
-              mempool.push(message);
-
-              res.json({ok: true});
-            }).catch(err => {
-              res.status(500);
-              res.json({error: err.stack});
-            });
-        } else {
-          res.status(400);
-          res.send({error: 'insufficient funds'});
-        }
-      } else {
-        res.status(400);
-        res.send({error: 'invalid signature'});
-      }
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  }); */
   const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
 
     if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
       if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-        const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+        const payload = JSON.stringify({type: 'send', asset, quantity, srcAddress, dstAddress, timestamp});
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
             const signatureString = signature.toString('base64');
-            const message = new Message('send', payload, signatureString);
+            const message = new Message(payload, signatureString);
             mempool.push(message);
           });
       } else {
@@ -1166,13 +1130,13 @@ const _listen = () => {
       const minter = _getUnconfirmedMinter(db, mempool, asset);
 
       if (minter === undefined) {
-        const payload = JSON.stringify({address, asset, timestamp});
+        const payload = JSON.stringify({type: 'minter', address, asset, timestamp});
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
             const signatureString = signature.toString('base64');
-            const message = new Message('mint', payload, signatureString);
+            const message = new Message(payload, signatureString);
             mempool.push(message);
           });
       } else {
@@ -1221,13 +1185,13 @@ const _listen = () => {
       const minter = _getUnconfirmedMinter(db, mempool, asset);
 
       if (minter === address) {
-        const payload = JSON.stringify({asset, quantity, address, timestamp});
+        const payload = JSON.stringify({type: 'mint', asset, quantity, address, timestamp});
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
             const signatureString = signature.toString('base64');
-            const message = new Message('mint', payload, signatureString);
+            const message = new Message(payload, signatureString);
             mempool.push(message);
           });
       } else {
@@ -1272,8 +1236,8 @@ const _listen = () => {
 
   const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
     if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-      const message = new Message('charge', payload, null);
+      const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
+      const message = new Message(payload, null);
       mempool.push(message);
 
       return Promise.resolve();
@@ -1319,13 +1283,13 @@ const _listen = () => {
       const {srcAddress} = JSON.parse(chargeMessaage.payload);
 
       if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
-        const payload = JSON.stringify({chargeSignature, timestamp});
+        const payload = JSON.stringify({type: 'chargeback', chargeSignature, timestamp});
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
         return eccrypto.sign(privateKeyBuffer, payloadHash)
           .then(signature => {
             const signatureString = signature.toString('base64');
-            const message = new Message('chargeback', payload, signatureString);
+            const message = new Message(payload, signatureString);
             mempool.push(message);
           });
       } else {
