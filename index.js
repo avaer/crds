@@ -40,21 +40,41 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
     const {type} = msg;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = JSON.parse(msg.payload);
-      if (dstAddress === address) {
-        result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+      const {asset: a, quantity, address} = JSON.parse(msg.payload);
+      let dstAddressEntry = db.balances[address];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
       }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'send') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
 
-      if (a === asset) {
-        if (srcAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
-        }
-        if (dstAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
-        }
+      let srcAddressEntry = db.balances[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        db.balances[srcAddress] = srcAddressEntry;
       }
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAddressEntry[asset] = srcAssetEntry - quantity;
+
+      let dstAddressEntry = db.balances[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
+      }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     }
   }
 
@@ -91,72 +111,81 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
   let result = _getConfirmedBalances(db, address);
 
-  for (let i = 0; i < db.charges.length; i++) { // XXX detect chargebacks
-    const charge = db.charges[i];
-    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
-
-    if (a === asset) {
-      if (srcAddress === address) {
-        result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
-      }
-      if (dstAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
-      }
-    }
-  }
-
   for (let i = 0; i < mempool.length; i++) {
     const msg = mempool[i];
     const {type} = msg;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = JSON.parse(msg.payload);
-      if (dstAddress === address) {
-        result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
+      const {asset: a, quantity, address} = JSON.parse(msg.payload);
+      let dstAddressEntry = db.balances[address];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
       }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'send') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      const {asset, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
 
-      if (a === asset) {
-        if (srcAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
-        }
-        if (dstAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
-        }
+      let srcAddressEntry = db.balances[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        db.balances[srcAddress] = srcAddressEntry;
       }
-    } else if (type === 'charge') {
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAddressEntry[asset] = srcAssetEntry - quantity;
 
-      if (a === asset) {
-        if (srcAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) - quantity;
-        }
-        if (dstAddress === address) {
-          result[asset] = (result[asset] !== undefined ? result[asset] : 0) + quantity;
-        }
+      let dstAddressEntry = db.balances[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        db.balances[dstAddress] = dstAddressEntry;
       }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     }
+  }
+
+  const invalidatedCharges = _getUnconmfirmedInvalidatedCharges(db, mempool);
+  for (let i = 0; i < invalidatedCharges.length; i++) {
+    const charge = invalidatedCharges[i];
+    const {asset, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+    let srcAddressEntry = db.balances[srcAddress];
+    if (srcAddressEntry === undefined){
+      srcAddressEntry = {};
+      db.balances[srcAddress] = srcAddressEntry;
+    }
+    let srcAssetEntry = srcAddressEntry[asset];
+    if (srcAssetEntry === undefined) {
+      srcAssetEntry = 0;
+    }
+    srcAddressEntry[asset] = srcAssetEntry + quantity;
+
+    let dstAddressEntry = db.balances[dstAddress];
+    if (dstAddressEntry === undefined){
+      dstAddressEntry = {};
+      db.balances[dstAddress] = dstAddressEntry;
+    }
+    let dstAssetEntry = dstAddressEntry[asset];
+    if (dstAssetEntry === undefined) {
+      dstAssetEntry = 0;
+    }
+    dstAddressEntry[asset] = dstAssetEntry - quantity;
   }
 
   return result;
 };
 const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
-
-  for (let i = 0; i < db.charges.length; i++) { // XXX detect chargebacks
-    const charge = db.charges[i];
-    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
-
-    if (a === asset) {
-      if (srcAddress === address) {
-        result -= quantity;
-      }
-      if (dstAddress === address) {
-        result += quantity;
-      }
-    }
-  }
 
   for (let i = 0; i < mempool.length; i++) {
     const msg = mempool[i];
@@ -192,6 +221,21 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
     }
   }
 
+  const invalidatedCharges = _getUnconmfirmedInvalidatedCharges(db, mempool);
+  for (let i = 0; i < invalidatedCharges.length; i++) {
+    const charge = invalidatedCharges[i];
+    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+    if (a === asset) {
+      if (srcAddress === address) {
+        result += quantity;
+      }
+      if (dstAddress === address) {
+        result -= quantity;
+      }
+    }
+  }
+
   return result;
 };
 const _findChargeMessage = (db, mempool, chargeSignature) => {
@@ -218,6 +262,167 @@ const _findChargeMessage = (db, mempool, chargeSignature) => {
   }
 
   return _findLocalChargeMessage(messages, mempool);
+};
+class AddressAssetSpec {
+  constructor(address, asset, balance, charges) {
+    this.address = address;
+    this.asset = asset;
+    this.balance = balance;
+    this.charges = charges;
+  }
+
+  equals(addressAssetSpec) {
+    return this.address === addressAssetSpec.address && this.asset === addressAssetSpec.asset;
+  }
+}
+const _getUnconmfirmedInvalidatedCharges = (db, mempool) => {
+  const charges = (() => {
+    const result = [];
+
+    for (let i = 0; i < db.charges.length; i++) {
+      const charge = db.charges[i];
+      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+      if (a === asset) {
+        result.push(msg);
+      }
+    }
+
+    for (let i = 0; i < mempool.length; i++) {
+      const msg = mempool[i];
+      const {type} = msg;
+
+      if (type === 'charge') {
+        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+
+        if (a === asset) {
+          result.push(msg);
+        }
+      }
+    }
+
+    return result;
+  })();
+  const chargebacks = (() => {
+    const result = [];
+
+    for (let i = 0; i < mempool.length; i++) {
+      const msg = mempool[i];
+      const {type} = msg;
+
+      if (type === 'chargeback') {
+        result.push(msg);
+      }
+    }
+
+    return result;
+  })();
+  const directlyInvalidatedCharges = chargebacks.map(chargeback => {
+    const {chargeSignature} = JSON.parse(chargeback.payload);
+    const chargeMessage = _findChargeMessage(db, mempool, chargeSignature);
+    return chargeMessage || null;
+  }).filter(chargeMessage => chargeMessage !== null);
+
+  const confirmedAddressAssetSpecs = (() => {
+    const result = [];
+
+    for (let i = 0; i < directlyInvalidatedCharges.length; i++) {
+      const charge = directlyInvalidatedCharges[i];
+      const {asset, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+      const srcEntry = new AddressAssetSpec(asset, srcAddress, 0, []);
+      if (!result.some(entry => entry.equals(srcEntry))) {
+        srcEntry.balance = _getConfirmedBalance(db, srcAddress, asset);
+
+        result.push(srcEntry);
+      }
+
+      const dstEntry = new AddressAssetSpec(asset, dstAddress, 0, []);
+      if (!result.some(entry => entry.equals(dstEntry))) {
+        dstEntry.balance = _getConfirmedBalance(db, dstAddress, asset);
+
+        result.push(dstEntry);
+      }
+    }
+
+    return result;
+  })();
+  const unsettledInvalidatedConfirmedAddressAssetSpecs = confirmedAddressAssetSpecs.map(addressAssetSpec => {
+    const {address, asset} = addressAssetSpec;
+    let {balance} = addressAssetSpec;
+    const charges = addressAssetSpec.charges.slice();
+
+    for (let i = 0; i < charges.length; i++) {
+      const charge = charges[i];
+
+      if (!directlyInvalidatedCharges.includes(charge)) {
+        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+        if (a === asset) {
+          let applied = false;
+
+          if (srcAddress === address) {
+            balance -= quantity;
+            applied = true;
+          }
+          if (dstAddress === address) {
+            balance += quantity;
+            applied = true;
+          }
+
+          if (applied) {
+            charges.push(charge);
+          }
+        }
+      }
+    }
+
+    return new AddressAssetSpec(address, asset, balance, charges);
+  });
+
+  const indirectlyInvalidatedCharges = (() => {
+    const result = [];
+
+    for (let i = 0; i < unsettledInvalidatedConfirmedAddressAssetSpecs.length; i++) {
+      const assetSpec = unsettledInvalidatedConfirmedAddressAssetSpecs[i];
+      const {address, asset} = assetSpec;
+      let {balance} = assetSpec;
+      const charges = assetSpec.charges.slice()
+        .sort((a, b) => {
+          const aJson = JSON.parse(a.payload);
+          const bJson = JSON.parse(b.payload);
+
+          const timestampDiff = aJson.timestamp - bJson.timestamp;
+          if (timestampDiff !== 0) {
+            return timestampDiff;
+          } else {
+            if (bigint(aJson.hash).leq(bigint(bJson.hash))) {
+              return -1;
+            } else {
+              return 1;
+            }
+          }
+        });
+
+      while (balance < 0 && charges.length > 0) {
+        const charge = charges.pop();
+        const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+        if (srcAddress === address) {
+          balance += quantity;
+        }
+        if (dstAddress === address) {
+          balance -= quantity;
+        }
+
+        result.push(charge);
+      }
+    }
+
+    return result;
+  })();
+
+  return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getUnconfirmedMinter = (db, mempool, asset) => {
   let minter = db.minters[asset];
