@@ -231,7 +231,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
     }
   }
 
-  const invalidatedCharges = _getUnconmfirmedInvalidatedCharges(db, mempool);
+  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
   for (let i = 0; i < invalidatedCharges.length; i++) {
     const charge = invalidatedCharges[i];
     const {asset, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
@@ -305,7 +305,7 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
     }
   }
 
-  const invalidatedCharges = _getUnconmfirmedInvalidatedCharges(db, mempool);
+  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
   for (let i = 0; i < invalidatedCharges.length; i++) {
     const charge = invalidatedCharges[i];
     const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
@@ -345,7 +345,21 @@ const _findLocalChargeMessage = (messages, signature) => {
   }
   return null;
 };
-const _findChargeMessage = (db, mempool, chargeSignature) => {
+const _findConfirmedChargeMessage = (db, chargeSignature) => {
+  const {blocks} = db;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    const {messages} = block;
+    const message = _findLocalChargeMessage(messages, chargeSignature);
+
+    if (message) {
+      return message;
+    }
+  }
+
+  return null;
+};
+const _findUnconfirmedChargeMessage = (db, mempool, chargeSignature) => {
   const {blocks} = db;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
@@ -371,51 +385,122 @@ class AddressAssetSpec {
     return this.address === addressAssetSpec.address && this.asset === addressAssetSpec.asset;
   }
 }
-const _getUnconmfirmedInvalidatedCharges = (db, mempool) => {
-  const charges = (() => {
+const _getConfirmedInvalidatedCharges = (db, block) => {
+  const charges = db.charges.slice();
+  const chargebacks = block.messages.filter(({type}) => type === 'chargeback');
+  const directlyInvalidatedCharges = chargebacks.map(chargeback => {
+    const {chargeSignature} = JSON.parse(chargeback.payload);
+    const chargeMessage = _findConfirmedChargeMessage(db, chargeSignature);
+    return chargeMessage || null;
+  }).filter(chargeMessage => chargeMessage !== null);
+
+  const confirmedAddressAssetSpecs = (() => {
     const result = [];
 
-    for (let i = 0; i < db.charges.length; i++) {
-      const charge = db.charges[i];
-      const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+    for (let i = 0; i < directlyInvalidatedCharges.length; i++) {
+      const charge = directlyInvalidatedCharges[i];
+      const {asset, srcAddress, dstAddress} = JSON.parse(charge.payload);
 
-      if (a === asset) {
-        result.push(msg);
+      const srcEntry = new AddressAssetSpec(asset, srcAddress, 0, []);
+      if (!result.some(entry => entry.equals(srcEntry))) {
+        srcEntry.balance = _getConfirmedBalance(db, srcAddress, asset);
+
+        result.push(srcEntry);
+      }
+
+      const dstEntry = new AddressAssetSpec(asset, dstAddress, 0, []);
+      if (!result.some(entry => entry.equals(dstEntry))) {
+        dstEntry.balance = _getConfirmedBalance(db, dstAddress, asset);
+
+        result.push(dstEntry);
       }
     }
 
-    for (let i = 0; i < mempool.length; i++) {
-      const msg = mempool[i];
-      const {type} = msg;
+    return result;
+  })();
+  const unsettledInvalidatedConfirmedAddressAssetSpecs = confirmedAddressAssetSpecs.map(addressAssetSpec => {
+    const {address, asset} = addressAssetSpec;
+    let {balance} = addressAssetSpec;
+    const charges = addressAssetSpec.charges.slice();
 
-      if (type === 'charge') {
-        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(msg.payload);
+    for (let i = 0; i < charges.length; i++) {
+      const charge = charges[i];
+
+      if (!directlyInvalidatedCharges.includes(charge)) {
+        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
 
         if (a === asset) {
-          result.push(msg);
+          let applied = false;
+
+          if (srcAddress === address) {
+            balance -= quantity;
+            applied = true;
+          }
+          if (dstAddress === address) {
+            balance += quantity;
+            applied = true;
+          }
+
+          if (applied) {
+            charges.push(charge);
+          }
         }
       }
     }
 
-    return result;
-  })();
-  const chargebacks = (() => {
+    return new AddressAssetSpec(address, asset, balance, charges);
+  });
+
+  const indirectlyInvalidatedCharges = (() => {
     const result = [];
 
-    for (let i = 0; i < mempool.length; i++) {
-      const msg = mempool[i];
-      const {type} = msg;
+    for (let i = 0; i < unsettledInvalidatedConfirmedAddressAssetSpecs.length; i++) {
+      const assetSpec = unsettledInvalidatedConfirmedAddressAssetSpecs[i];
+      const {address, asset} = assetSpec;
+      let {balance} = assetSpec;
+      const charges = assetSpec.charges.slice()
+        .sort((a, b) => {
+          const aJson = JSON.parse(a.payload);
+          const bJson = JSON.parse(b.payload);
 
-      if (type === 'chargeback') {
-        result.push(msg);
+          const timestampDiff = aJson.timestamp - bJson.timestamp;
+          if (timestampDiff !== 0) {
+            return timestampDiff;
+          } else {
+            if (bigint(aJson.hash).leq(bigint(bJson.hash))) {
+              return -1;
+            } else {
+              return 1;
+            }
+          }
+        });
+
+      while (balance < 0 && charges.length > 0) {
+        const charge = charges.pop();
+        const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+
+        if (srcAddress === address) {
+          balance += quantity;
+        }
+        if (dstAddress === address) {
+          balance -= quantity;
+        }
+
+        result.push(charge);
       }
     }
 
     return result;
   })();
+
+  return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
+};
+const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
+  const charges = db.charges.concat(mempool.filter(({type}) => type === 'charge'));
+  const chargebacks = mempool.filter(({type}) => type === 'chargeback');
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findChargeMessage(db, mempool, chargeSignature);
+    const chargeMessage = _findUnconfirmedChargeMessage(db, mempool, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -640,6 +725,19 @@ const _commitBlock = (db, mempool, block) => {
       dstAddressEntry[asset] = dstAssetEntry;
     } else if (type === 'minter') {
       const {asset, address} = JSON.parse(msg.payload);
+      const mintAsset = asset + ':mint';
+
+      let addressEntry = db.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        db.balances[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[mintAsset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry += 1;
+      addressEntry[mintAsset] = assetEntry;
 
       db.minters[asset] = address;
     } else if (type === 'mint') {
@@ -659,7 +757,7 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
-  // add blocks
+  // add block
   db.blocks.push(block);
 
   // add new charges
@@ -672,8 +770,12 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
-  // apply charegebacks
-  // XXX finish this
+  // apply chargebacks
+  const invalidatedCharges = _getConfirmedInvalidatedCharges(db, block);
+  for (let i = 0; i < invalidatedCharges.length; i++) {
+    const charge = invalidatedCharges[i];
+    db.charges.splice(db.charges.indexOf(charge), 1);
+  }
 
   // settle charges
   const oldCharges = db.charges.slice();
@@ -1183,7 +1285,7 @@ const _listen = () => {
   });
 
   const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
-    const chargeMessaage = _findChargeMessage(db, mempool, chargeSignature);
+    const chargeMessaage = _findUnconfirmedChargeMessage(db, mempool, chargeSignature);
 
     if (chargeMessaage) {
       const privateKeyBuffer = new Buffer(privateKey, 'base64');
