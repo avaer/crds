@@ -750,118 +750,116 @@ const _listen = () => {
 
   http.createServer(app)
     .listen(9999);
-};
 
-const r = repl.start({
-  prompt: '> ',
-  terminal: true,
-  eval: (cmd, context, filename, callback) => {
-    const split = cmd.split(/\s/);
-    const command = split[0];
+  const r = repl.start({
+    prompt: '> ',
+    terminal: true,
+    eval: (cmd, context, filename, callback) => {
+      const split = cmd.split(/\s/);
+      const command = split[0];
 
-    switch (command) {
-      case 'db': {
-        console.log(JSON.stringify(db, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'blocks': {
-        console.log(JSON.stringify(db.blocks, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'blockcount': {
-        console.log(JSON.stringify(db.blocks.length, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'mempool': {
-        console.log(JSON.stringify(mempool, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'balances': {
-        const [, address] = split;
-        const balances = _getConfirmedBalances(db, address);
-        console.log(JSON.stringify(balances, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'balances': {
-        const [, address, asset] = split;
-        const balance = _getConfirmedBalance(db, address, asset);
-        console.log(JSON.stringify(balance, null, 2));
-        process.stdout.write('> ');
-        break;
-      }
-      case 'send': {
-        const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
-        const quantityNumber = parseInt(quantityString, 10);
-        const timestamp = Date.now();
+      switch (command) {
+        case 'db': {
+          console.log(JSON.stringify(db, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'blocks': {
+          console.log(JSON.stringify(db.blocks, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'blockcount': {
+          console.log(JSON.stringify(db.blocks.length, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'mempool': {
+          console.log(JSON.stringify(mempool, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'balances': {
+          const [, address] = split;
+          const balances = _getConfirmedBalances(db, address);
+          console.log(JSON.stringify(balances, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'balances': {
+          const [, address, asset] = split;
+          const balance = _getConfirmedBalance(db, address, asset);
+          console.log(JSON.stringify(balance, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'send': {
+          const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
+          const quantityNumber = parseInt(quantityString, 10);
+          const timestamp = Date.now();
 
-        _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-        break;
-      }
-      case 'mint': {
-        const [, asset, quantityString, address, privateKey] = split;
-        const quantityNumber = parseInt(quantityString, 10);
-        const timestamp = Date.now();
+          _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'mint': {
+          const [, asset, quantityString, address, privateKey] = split;
+          const quantityNumber = parseInt(quantityString, 10);
+          const timestamp = Date.now();
 
-        _createMint({asset, quantity: quantityNumber, address, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-        break;
-      }
-      case 'charge': {
-        const [, asset, quantity, srcAddress, dstAddress] = split;
-        quantity = parseInt(quantity, 10);
-        const timestamp = Date.now();
+          _createMint({asset, quantity: quantityNumber, address, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'charge': {
+          const [, asset, quantity, srcAddress, dstAddress] = split;
+          quantity = parseInt(quantity, 10);
+          const timestamp = Date.now();
 
-        _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-        break;
-      }
-      case 'chargeback': {
-        const [, chargeSignature, privateKey] = split;
-        const timestamp = Date.now();
+          _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'chargeback': {
+          const [, chargeSignature, privateKey] = split;
+          const timestamp = Date.now();
 
-        _createChargeback({chargeSignature, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-        break;
+          _createChargeback({chargeSignature, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        default: {
+          callback('invalid command');
+          // process.stdout.write('> ');
+          break;
+        }
       }
-      default: {
-        callback('invalid command');
-        // process.stdout.write('> ');
-        break;
-      }
-    }
-  },
-});
-const _repl = () => {
+    },
+  });
   replHistory(r, process.env.HOME + '/.hasher_history');
   r.on('exit', () => {
     console.log();
@@ -893,7 +891,6 @@ const _mine = () => {
 _load()
   .then(() => {
     _listen();
-    _repl();
     _mine();
   })
   .catch(err => {
