@@ -8,7 +8,8 @@
     "body-parser": "^1.17.2",
     "eccrypto": "^1.0.3",
     "express": "^4.15.3",
-    "repl.history": "^0.1.4"
+    "repl.history": "^0.1.4",
+    "write-file-atomic": "^2.1.0"
   },
   "devDependencies": {},
   "scripts": {

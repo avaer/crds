@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const repl = require('repl');
@@ -6,6 +8,7 @@ const replHistory = require('repl.history');
 const express = require('express');
 const bodyParser = require('body-parser');
 const bodyParserJson = bodyParser.json();
+const writeFileAtomic = require('write-file-atomic');
 const bigint = require('big-integer');
 const eccrypto = require('eccrypto');
 
@@ -19,16 +22,6 @@ const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOX
 
 const difficulty = 1e5;
 const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
-
-const db = {
-  version: '0.0.1',
-  blocks: [],
-  balances: {},
-  minters: {
-    'CRD': null,
-  },
-};
-let mempool = [];
 
 const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
 const _getConfirmedBalance = (db, address, asset) => {
@@ -352,379 +345,412 @@ const doHash = () => new Promise((accept, reject) => {
   }
 });
 
-const _recurse = () => {
-  doHash()
-    .then(block => {
-      if (block !== null) {
-        const now = Date.now();
-        const timeDiff = now - lastBlockTime;
-        const timeTaken = timeDiff / 1000;
-        // console.log('block', block.hash, timeTaken + 's', Math.floor(numHashes / timeTaken) + ' h/s');
-        lastBlockTime = now;
-        numHashes = 0;
-
-        mempool = _commitBlock(db, mempool, block);
-      } /* else {
-        console.log('no block yet');
-      } */
-
-      setImmediate(_recurse);
-    });
+const dbPath = path.join(__dirname, 'db.json');
+let db = {
+  version: '0.0.1',
+  blocks: [],
+  balances: {},
+  minters: {
+    'CRD': null,
+  },
 };
-_recurse();
+let mempool = [];
+const _load = () => new Promise((accept, reject) => {
+  fs.readFile(dbPath, 'utf8', (err, s) => {
+    if (!err) {
+      const j = JSON.parse(s);
+      db = j;
 
-const app = express();
+      accept();
+    } else if (err.code === 'ENOENT') {
+      accept();
+    } else {
+      reject(err);
+    }
+  });
+});
+const _save = (() => {
+  let running = false;
+  let queued = false;
 
-app.get('/balances/:address', (req, res, next) => {
-  const {address, asset} = req.params;
-  const balance = _getConfirmedBalances(db, address);
-  res.json({balance});
-});
-app.get('/balance/:address/:asset', (req, res, next) => {
-  const {address, asset} = req.params;
-  const balance = _getConfirmedBalance(db, address, asset);
-  res.json({balance});
-});
-app.get('/unconfirmedBalances/:address', (req, res, next) => {
-  const {address, asset} = req.params;
-  const balance = _getUnconfirmedBalances(db, address);
-  res.json({balance});
-});
-app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
-  const {address, asset} = req.params;
-  const balance = _getUnconfirmedBalance(db, address, asset);
-  res.json({balance});
-});
+  const _recurse = () => {
+    if (!running) {
+      running = true;
 
-/* app.post('/send', bodyParserJson, (req, res, next) => {
-  const {body} = req;
+      writeFileAtomic(dbPath, JSON.stringify(db, null, 2), err => {
+        if (err) {
+          console.warn(err);
+        }
 
-  if (
-    body &&
-    typeof body.asset === 'string' &&
-    typeof body.quantity === 'number' &&
-    typeof body.srcAddress === 'string' &&
-    typeof body.dstAddress === 'string' &&
-    typeof body.timestamp === 'number' &&
-    typeof body.signature === 'string'
-  ) {
-    const {asset, quantity, srcAddress, dstAddress, timestamp, signature} = body;
+        running = false;
+
+        if (queued) {
+          queued = false;
+
+          _recurse();
+        }
+      });
+    } else {
+      queued = true;
+    }
+  };
+  return _recurse;
+})();
+
+const _listen = () => {
+  const app = express();
+
+  app.get('/balances/:address', (req, res, next) => {
+    const {address, asset} = req.params;
+    const balance = _getConfirmedBalances(db, address);
+    res.json({balance});
+  });
+  app.get('/balance/:address/:asset', (req, res, next) => {
+    const {address, asset} = req.params;
+    const balance = _getConfirmedBalance(db, address, asset);
+    res.json({balance});
+  });
+  app.get('/unconfirmedBalances/:address', (req, res, next) => {
+    const {address, asset} = req.params;
+    const balance = _getUnconfirmedBalances(db, address);
+    res.json({balance});
+  });
+  app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
+    const {address, asset} = req.params;
+    const balance = _getUnconfirmedBalance(db, address, asset);
+    res.json({balance});
+  });
+
+  /* app.post('/send', bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number' &&
+      typeof body.srcAddress === 'string' &&
+      typeof body.dstAddress === 'string' &&
+      typeof body.timestamp === 'number' &&
+      typeof body.signature === 'string'
+    ) {
+      const {asset, quantity, srcAddress, dstAddress, timestamp, signature} = body;
+
+      if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
+        if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+          const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+          eccrypto.verify(srcAddress, payloadHash, signature)
+            .then(() => {
+              const message = new Message('send', payload, signature);
+              mempool.push(message);
+
+              res.json({ok: true});
+            }).catch(err => {
+              res.status(500);
+              res.json({error: err.stack});
+            });
+        } else {
+          res.status(400);
+          res.send({error: 'insufficient funds'});
+        }
+      } else {
+        res.status(400);
+        res.send({error: 'invalid signature'});
+      }
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  }); */
+  const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
 
     if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
       if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
         const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-        eccrypto.verify(srcAddress, payloadHash, signature)
-          .then(() => {
-            const message = new Message('send', payload, signature);
+        return eccrypto.sign(privateKeyBuffer, payloadHash)
+          .then(signature => {
+            const signatureString = signature.toString('base64');
+            const message = new Message('send', payload, signatureString);
             mempool.push(message);
-
-            res.json({ok: true});
-          }).catch(err => {
-            res.status(500);
-            res.json({error: err.stack});
           });
       } else {
-        res.status(400);
-        res.send({error: 'insufficient funds'});
+        return Promise.reject({
+          status: 400,
+          stack: 'insufficient funds',
+        });
       }
-    } else {
-      res.status(400);
-      res.send({error: 'invalid signature'});
-    }
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-}); */
-const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privateKey}) => {
-  const privateKeyBuffer = new Buffer(privateKey, 'base64');
-
-  if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
-    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-      const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-      return eccrypto.sign(privateKeyBuffer, payloadHash)
-        .then(signature => {
-          const signatureString = signature.toString('base64');
-          const message = new Message('send', payload, signatureString);
-          mempool.push(message);
-        });
-    } else {
-      return Promise.reject({
-        status: 400,
-        stack: 'insufficient funds',
-      });
-    }
-  } else {
-    return Promise.reject({
-      status: 400,
-      stack: 'invalid signature',
-    });
-  }
-};
-app.post('/createSend', bodyParserJson, (req, res, next) => {
-  const {body} = req;
-
-  if (
-    body &&
-    typeof body.asset === 'string' &&
-    typeof body.quantity === 'number' &&
-    typeof body.srcAddress === 'string' &&
-    typeof body.dstAddress === 'string' &&
-    typeof body.timestamp === 'number' &&
-    typeof body.privateKey === 'string'
-  ) {
-    const {asset, quantity, srcAddress, dstAddress, timestamp, privateKey} = body;
-
-    _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
-      .then(() => {
-        res.json({ok: true});
-      })
-      .catch(err => {
-        res.status(err.status || 500);
-        res.json({error: err.stack});
-      });
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-});
-
-/* app.post('/mint', bodyParserJson, (req, res, next) => {
-  const {body} = req;
-
-  if (
-    body &&
-    typeof body.asset === 'string' &&
-    typeof body.quantity === 'number' &&
-    typeof body.address === 'string' &&
-    typeof body.timestamp === 'number' &&
-    typeof body.signature === 'string'
-  ) {
-    const {asset, quantity, address, timestamp, signature} = body;
-
-    const minter = _getUnconfirmedMinter(db, mempool, asset);
-    const isNewMinter = minter === undefined;
-    const isOldMinter = minter === address;
-    if (isNewMinter || isOldMinter) {
-      const _requestMintAsset = () => {
-        const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-        return eccrypto.verify(srcAddress, payloadHash, signature)
-          .then(() => {
-            const message = new Message('mint', payload, signature);
-            mempool.push(message);
-          });
-      };
-      const _requestBaseAsset = () => {
-        const payload = JSON.stringify({asset, quantity, address, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-        return eccrypto.verify(srcAddress, payloadHash, signature)
-          .then(() => {
-            const message = new Message('mint', payload, signature);
-            mempool.push(message);
-          });
-      };
-
-      Promise.all([
-        isNewMinter ? _requestMintAsset() : Promise.resolve(),
-        _requestBaseAsset(),
-      ])
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'address is not minter of this asset'});
-    }
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-}); */
-const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
-  const privateKeyBuffer = new Buffer(privateKey, 'base64');
-
-  if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === address) {
-    const minter = _getUnconfirmedMinter(db, mempool, asset);
-    const isNewMinter = minter === undefined;
-    const isOldMinter = minter === address;
-
-    if (isNewMinter || isOldMinter) {
-      const _requestMintAsset = () => {
-        const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-        return eccrypto.sign(privateKeyBuffer, payloadHash)
-          .then(signature => {
-            const signatureString = signature.toString('base64');
-            const message = new Message('mint', payload, signatureString);
-            mempool.push(message);
-          });
-      };
-      const _requestBaseAsset = () => {
-        const payload = JSON.stringify({asset, quantity, address, timestamp});
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-        return eccrypto.sign(privateKeyBuffer, payloadHash)
-          .then(signature => {
-            const signatureString = signature.toString('base64');
-            const message = new Message('mint', payload, signatureString);
-            mempool.push(message);
-          });
-      };
-
-      return Promise.all([
-        isNewMinter ? _requestMintAsset() : Promise.resolve(),
-        _requestBaseAsset(),
-      ]);
-    } else {
-      return Promise.reject({
-        status: 400,
-        stack: 'address is not minter of this asset',
-      });
-    }
-  } else {
-    return Promise.reject({
-      status: 400,
-      stack: 'invalid signature',
-    });
-  }
-};
-app.post('/createMint', bodyParserJson, (req, res, next) => {
-  const {body} = req;
-
-  if (
-    body &&
-    typeof body.asset === 'string' &&
-    typeof body.quantity === 'number' &&
-    typeof body.address === 'string' &&
-    typeof body.timestamp === 'number' &&
-    typeof body.privateKey === 'string'
-  ) {
-    const {asset, quantity, address, timestamp, privateKey} = body;
-
-    _createMint({asset, quantity, address, timestamp, privateKey})
-      .then(() => {
-        res.json({ok: true});
-      })
-      .catch(err => {
-        res.status(err.status || 500);
-        res.json({error: err.stack});
-      });
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-});
-
-const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
-  if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-    const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
-    const message = new Message('charge', payload, null);
-    mempool.push(message);
-
-    return Promise.resolve();
-  } else {
-    return Promise.reject({
-      status: 400,
-      stack: 'insufficient funds',
-    });
-  }
-};
-app.post('/createCharge', bodyParserJson, (req, res, next) => {
-  const {body} = req;
-
-  if (
-    body &&
-    typeof body.asset === 'string' &&
-    typeof body.quantity === 'number' &&
-    typeof body.srcAddress === 'string' &&
-    typeof body.dstAddress === 'string' &&
-    typeof body.timestamp === 'number'
-  ) {
-    const {asset, quantity, srcAddress, dstAddress, timestamp} = body;
-
-    _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
-      .then(() => {
-        res.json({ok: true});
-      })
-      .catch(err => {
-        res.status(err.status || 500);
-        res.json({error: err.stack});
-      });
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-});
-
-const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
-  const chargeMessaage = _findChargeMessage(db, mempool, chargeSignature);
-
-  if (chargeMessaage) {
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const {srcAddress} = JSON.parse(chargeMessaage.payload);
-
-    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
-      const payload = JSON.stringify({chargeSignature, timestamp});
-      const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
-      return eccrypto.sign(privateKeyBuffer, payloadHash)
-        .then(signature => {
-          const signatureString = signature.toString('base64');
-          const message = new Message('chargeback', payload, signatureString);
-          mempool.push(message);
-        });
     } else {
       return Promise.reject({
         status: 400,
         stack: 'invalid signature',
       });
     }
-  } else {
-    return Promise.reject({
-      status: 400,
-      stack: 'no such charge to chargeback',
-    });
-  }
-};
-app.post('/createChargeback', bodyParserJson, (req, res, next) => {
-  const {body} = req;
+  };
+  app.post('/createSend', bodyParserJson, (req, res, next) => {
+    const {body} = req;
 
-  if (
-    body &&
-    typeof body.chargeSignature === 'string' &&
-    typeof body.timestamp === 'number' &&
-    typeof body.privateKey === 'string'
-  ) {
-    const {chargeSignature, timestamp, privateKey} = body;
+    if (
+      body &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number' &&
+      typeof body.srcAddress === 'string' &&
+      typeof body.dstAddress === 'string' &&
+      typeof body.timestamp === 'number' &&
+      typeof body.privateKey === 'string'
+    ) {
+      const {asset, quantity, srcAddress, dstAddress, timestamp, privateKey} = body;
 
-    _createChargeback({chargeSignature, timestamp, privateKey})
-      .then(() => {
-        res.json({ok: true});
-      })
-      .catch(err => {
-        res.status(err.status || 500);
-        res.json({error: err.stack});
+      _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
+  /* app.post('/mint', bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number' &&
+      typeof body.address === 'string' &&
+      typeof body.timestamp === 'number' &&
+      typeof body.signature === 'string'
+    ) {
+      const {asset, quantity, address, timestamp, signature} = body;
+
+      const minter = _getUnconfirmedMinter(db, mempool, asset);
+      const isNewMinter = minter === undefined;
+      const isOldMinter = minter === address;
+      if (isNewMinter || isOldMinter) {
+        const _requestMintAsset = () => {
+          const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+          return eccrypto.verify(srcAddress, payloadHash, signature)
+            .then(() => {
+              const message = new Message('mint', payload, signature);
+              mempool.push(message);
+            });
+        };
+        const _requestBaseAsset = () => {
+          const payload = JSON.stringify({asset, quantity, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+          return eccrypto.verify(srcAddress, payloadHash, signature)
+            .then(() => {
+              const message = new Message('mint', payload, signature);
+              mempool.push(message);
+            });
+        };
+
+        Promise.all([
+          isNewMinter ? _requestMintAsset() : Promise.resolve(),
+          _requestBaseAsset(),
+        ])
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'address is not minter of this asset'});
+      }
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  }); */
+  const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+
+    if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === address) {
+      const minter = _getUnconfirmedMinter(db, mempool, asset);
+      const isNewMinter = minter === undefined;
+      const isOldMinter = minter === address;
+
+      if (isNewMinter || isOldMinter) {
+        const _requestMintAsset = () => {
+          const payload = JSON.stringify({asset: asset + ':mint', quantity: 1, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+          return eccrypto.sign(privateKeyBuffer, payloadHash)
+            .then(signature => {
+              const signatureString = signature.toString('base64');
+              const message = new Message('mint', payload, signatureString);
+              mempool.push(message);
+            });
+        };
+        const _requestBaseAsset = () => {
+          const payload = JSON.stringify({asset, quantity, address, timestamp});
+          const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+          return eccrypto.sign(privateKeyBuffer, payloadHash)
+            .then(signature => {
+              const signatureString = signature.toString('base64');
+              const message = new Message('mint', payload, signatureString);
+              mempool.push(message);
+            });
+        };
+
+        return Promise.all([
+          isNewMinter ? _requestMintAsset() : Promise.resolve(),
+          _requestBaseAsset(),
+        ]);
+      } else {
+        return Promise.reject({
+          status: 400,
+          stack: 'address is not minter of this asset',
+        });
+      }
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'invalid signature',
       });
-  } else {
-    res.status(400);
-    res.send({error: 'invalid parameters'});
-  }
-});
+    }
+  };
+  app.post('/createMint', bodyParserJson, (req, res, next) => {
+    const {body} = req;
 
-http.createServer(app)
-  .listen(9999);
+    if (
+      body &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number' &&
+      typeof body.address === 'string' &&
+      typeof body.timestamp === 'number' &&
+      typeof body.privateKey === 'string'
+    ) {
+      const {asset, quantity, address, timestamp, privateKey} = body;
+
+      _createMint({asset, quantity, address, timestamp, privateKey})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
+  const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
+    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+      const payload = JSON.stringify({asset, quantity, srcAddress, dstAddress, timestamp});
+      const message = new Message('charge', payload, null);
+      mempool.push(message);
+
+      return Promise.resolve();
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'insufficient funds',
+      });
+    }
+  };
+  app.post('/createCharge', bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number' &&
+      typeof body.srcAddress === 'string' &&
+      typeof body.dstAddress === 'string' &&
+      typeof body.timestamp === 'number'
+    ) {
+      const {asset, quantity, srcAddress, dstAddress, timestamp} = body;
+
+      _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
+  const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
+    const chargeMessaage = _findChargeMessage(db, mempool, chargeSignature);
+
+    if (chargeMessaage) {
+      const privateKeyBuffer = new Buffer(privateKey, 'base64');
+      const {srcAddress} = JSON.parse(chargeMessaage.payload);
+
+      if (eccrypto.getPublic(privateKeyBuffer).toString('base64') === srcAddress) {
+        const payload = JSON.stringify({chargeSignature, timestamp});
+        const payloadHash = crypto.createHash('sha256').update(payload).digest();
+
+        return eccrypto.sign(privateKeyBuffer, payloadHash)
+          .then(signature => {
+            const signatureString = signature.toString('base64');
+            const message = new Message('chargeback', payload, signatureString);
+            mempool.push(message);
+          });
+      } else {
+        return Promise.reject({
+          status: 400,
+          stack: 'invalid signature',
+        });
+      }
+    } else {
+      return Promise.reject({
+        status: 400,
+        stack: 'no such charge to chargeback',
+      });
+    }
+  };
+  app.post('/createChargeback', bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.chargeSignature === 'string' &&
+      typeof body.timestamp === 'number' &&
+      typeof body.privateKey === 'string'
+    ) {
+      const {chargeSignature, timestamp, privateKey} = body;
+
+      _createChargeback({chargeSignature, timestamp, privateKey})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
+  http.createServer(app)
+    .listen(9999);
+};
 
 const r = repl.start({
   prompt: '> ',
@@ -835,8 +861,42 @@ const r = repl.start({
     }
   },
 });
-replHistory(r, process.env.HOME + '/.hasher_history');
-r.on('exit', () => {
-  console.log();
-  process.exit(0);
-});
+const _repl = () => {
+  replHistory(r, process.env.HOME + '/.hasher_history');
+  r.on('exit', () => {
+    console.log();
+    process.exit(0);
+  });
+};
+const _mine = () => {
+  doHash()
+    .then(block => {
+      if (block !== null) {
+        const now = Date.now();
+        const timeDiff = now - lastBlockTime;
+        const timeTaken = timeDiff / 1000;
+        // console.log('block', block.hash, timeTaken + 's', Math.floor(numHashes / timeTaken) + ' h/s');
+        lastBlockTime = now;
+        numHashes = 0;
+
+        mempool = _commitBlock(db, mempool, block);
+
+        _save();
+      } /* else {
+        console.log('no block yet');
+      } */
+
+      setImmediate(_mine);
+    });
+};
+
+_load()
+  .then(() => {
+    _listen();
+    _repl();
+    _mine();
+  })
+  .catch(err => {
+    console.warn(err);
+    process.exit(1);
+  });
