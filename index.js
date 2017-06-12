@@ -874,7 +874,7 @@ const _listen = () => {
       }
     },
   });
-  replHistory(r, process.env.HOME + '/.hasher_history');
+  replHistory(r, path.join(__dirname, 'history.txt'));
   r.on('exit', () => {
     console.log();
     process.exit(0);
