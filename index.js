@@ -1,21 +1,36 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const querystring = require('querystring');
 const crypto = require('crypto');
 const repl = require('repl');
-const replHistory = require('repl.history');
 
 const mkdirp = require('mkdirp');
 const express = require('express');
 const bodyParser = require('body-parser');
 const bodyParserJson = bodyParser.json();
+const request = require('request');
 const writeFileAtomic = require('write-file-atomic');
+const replHistory = require('repl.history');
 const bigint = require('big-integer');
 const eccrypto = require('eccrypto');
 
-const PORT = 9999;
 const WORK_TIME = 20;
 const CHARGE_SETTLE_BLOCKS = 100;
+
+const args = process.argv.slice(2);
+const _findArg = name => {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const match = arg.match(new RegExp('^' + name + '=(.+)$'));
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+};
+const port = parseInt(_findArg('port')) || 9999;
+const dataDirectory = _findArg('dataDirectory') || 'db';
 
 class Block {
   constructor(hash, prevHash, timestamp, messages, nonce) {
@@ -54,6 +69,7 @@ let db = {
   },
 };
 let mempool = [];
+let peers = [];
 
 const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
@@ -869,7 +885,7 @@ const doHash = () => new Promise((accept, reject) => {
   }
 });
 
-const dbPath = path.join(__dirname, 'db');
+const dbPath = path.join(__dirname, dataDirectory);
 const _load = () => new Promise((accept, reject) => {
   fs.readdir(dbPath, (err, files) => {
     if (!err || err.code === 'ENOENT') {
@@ -1339,8 +1355,75 @@ const _listen = () => {
     }
   });
 
+  const _getBlocks = ({skip, limit}) => db.blocks.slice(skip, skip + limit);
+  app.get('/blocks', (req, res, next) => {
+    const {skip: skipString, limit: limitString} = req.query;
+    let skip = parseInt(skipString, 10);
+    if (isNaN(skip)) {
+      skip = 0;
+    }
+    let limit = parseInt(limitString, 10);
+    if (isNaN(limit)) {
+      limit = Infinity;
+    }
+
+    const blocks = _getBlocks({skip, limit});
+    res.json({
+      blocks,
+    });
+  });
+  app.get('/blockcount', (req, res, next) => {
+    const blockcount = db.blocks.length;
+
+    res.json({
+      blockcount,
+    });
+  });
+  app.get('/db', (req, res, next) => {
+    const {skip: skipString, limit: limitString} = req.query;
+    const skip = parseInt(skipString, 10) || 0;
+    const limit = parseInt(limitString, 10) || Infinity;
+
+    if ((skip >= (db.blocks.length - 10)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
+      res.type('application/json');
+      res.write('[');
+
+      const _recurse = i => {
+        const dbIndex = skip + i;
+
+        if (i < limit && dbIndex < db.blocks.length) {
+          const _next = () => {
+            _recurse(i + 1);
+          };
+
+          if (i !== 0) {
+            res.write(',\n');
+          }
+
+          if (dbIndex === (db.blocks.length - 1)) {
+            res.write(JSON.stringify(db, null, 2));
+
+            _next();
+          } else {
+            const rs = fs.createReadStream(path.join(dbPath, `db-${dbIndex}.json`));
+            rs.pipe(res, {end: false});
+            rs.on('end', () => {
+              _next();
+            });
+          }
+        } else {
+          res.end(']');
+        }
+      };
+      _recurse(0);
+    } else {
+      res.status(404);
+      res.send({error: 'skip/limit out of range'});
+    }
+  });
+
   http.createServer(app)
-    .listen(PORT);
+    .listen(port);
 
   const r = repl.start({
     prompt: '> ',
@@ -1470,6 +1553,28 @@ const _listen = () => {
             });
           break;
         }
+        case 'mine': {
+          const [, flag] = split;
+
+          if (flag === String(true)) {
+            _startMine();
+            process.stdout.write('> ');
+          } else if (flag === String(false)) {
+            _stopMine();
+            process.stdout.write('> ');
+          } else {
+            console.log(mineImmediate !== null);
+            process.stdout.write('> ');
+          }
+          break;
+        }
+        case 'connect': {
+          const [, url] = split;
+          peers.push(url);
+
+          _sync();
+          break;
+        }
         default: {
           console.warn('invalid command');
           process.stdout.write('> ');
@@ -1485,6 +1590,8 @@ const _listen = () => {
     process.exit(0);
   });
 };
+
+let mineImmediate = null;
 const _mine = () => {
   doHash()
     .then(block => {
@@ -1500,15 +1607,89 @@ const _mine = () => {
         _save();
       }
 
-      setImmediate(_mine);
+      mineImmediate = setImmediate(_mine);
     });
+};
+const _startMine = () => {
+  mineImmediate = setImmediate(_mine);
+};
+const _stopMine = () => {
+  clearImmediate(mineImmediate);
+  mineImmediate = null;
+};
+
+const _sync = () => {
+  const peer = peers[Math.floor(Math.random() * peers.length)];
+
+  const _requestMatchingBlockIndex = () => new Promise((accept, reject) => {
+    const skip = Math.max(db.blocks.length - 10, 0);
+    const limit = Math.min(db.blocks.length, 10);
+
+    request(peer + '/blocks?' + querystring.stringify({
+      skip,
+      limit,
+    }), {
+      json: true,
+    }, (err, res, body) => {
+      if (!err) {
+        const {blocks: remoteBlocks} = body;
+        const matchingBlockIndex = (() => {
+          for (let i = 0; i < remoteBlocks.length; i++) {
+            const remoteBlock = remoteBlocks[i];
+            const localBlockIndex = skip + i;
+            const localBlock = db.blocks[localBlockIndex];
+
+            if (remoteBlock.hash !== localBlock.hash) {
+              return i - 1;
+            }
+          }
+          return -1;
+        })();
+
+        accept(matchingBlockIndex);
+      } else {
+        reject(err);
+      }
+    });
+  });
+  const _requestBlockCount = () => new Promise((accept, reject) => {
+    request(peer + '/blockcount', {
+      json: true,
+    }, (err, res, body) => {
+      if (!err) {
+        const {blockcount} = body;
+        accept(blockcount);
+      } else {
+        reject(err);
+      }
+    });
+  });
+
+  Promise.all([
+    _requestMatchingBlockIndex(),
+    _requestBlockCount(),
+  ])
+    .then(([
+      matchingBlockIndex,
+      blockcount,
+    ]) => {
+      request(peer + '/db?' + querystring.stringify({
+        skip: blockcount - 10,
+        limit: 10,
+      }), {
+        json: true,
+      }, (err, res, body) => {
+        if (!err) {
+          console.log('got dbs', body);
+        } else {
+          console.warn(err);
+        }
+      });
+  });
 };
 
 _load()
-  .then(() => {
-    _listen();
-    _mine();
-  })
+  .then(() => _listen())
   .catch(err => {
     console.warn(err);
     process.exit(1);
