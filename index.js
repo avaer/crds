@@ -866,7 +866,8 @@ const _listen = () => {
           break;
         }
         default: {
-          callback('invalid command');
+          console.warn('invalid command');
+          process.stdout.write('> ');
           // process.stdout.write('> ');
           break;
         }
