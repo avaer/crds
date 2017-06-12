@@ -17,6 +17,44 @@ const PORT = 9999;
 const WORK_TIME = 20;
 const CHARGE_SETTLE_BLOCKS = 100;
 
+class Block {
+  constructor(hash, prevHash, timestamp, messages, nonce) {
+    this.hash = hash;
+    this.prevHash = prevHash;
+    this.timestamp = timestamp;
+    this.messages = messages;
+    this.nonce = nonce;
+  }
+
+  from(o) {
+    const {hash, prevHash, timestamp, messages, nonce} = o;
+    return new Block(hash, prevHash, timestamp, messages, nonce);
+  }
+}
+class Message {
+  constructor(type, payload, signature) {
+    this.type = type;
+    this.payload = payload;
+    this.signature = signature;
+  }
+
+  from(o) {
+    const {type, payload, signature} = o;
+    return new Message(type, payload, signature);
+  }
+}
+
+let db = {
+  version: '0.0.1',
+  blocks: [],
+  balances: {},
+  charges: [],
+  minters: {
+    'CRD': null,
+  },
+};
+let mempool = [];
+
 const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
 
@@ -676,23 +714,6 @@ const _commitBlock = (db, mempool, block) => {
   return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
 };
 
-class Block {
-  constructor(hash, prevHash, timestamp, messages, nonce) {
-    this.hash = hash;
-    this.prevHash = prevHash;
-    this.timestamp = timestamp;
-    this.messages = messages;
-    this.nonce = nonce;
-  }
-}
-class Message {
-  constructor(type, payload, signature) {
-    this.type = type;
-    this.payload = payload;
-    this.signature = signature;
-  }
-}
-
 let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
@@ -744,16 +765,6 @@ const doHash = () => new Promise((accept, reject) => {
 });
 
 const dbPath = path.join(__dirname, 'db');
-let db = {
-  version: '0.0.1',
-  blocks: [],
-  balances: {},
-  charges: [],
-  minters: {
-    'CRD': null,
-  },
-};
-let mempool = [];
 const _load = () => new Promise((accept, reject) => {
   fs.readdir(dbPath, (err, files) => {
     if (!err || err.code === 'ENOENT') {
@@ -783,6 +794,8 @@ const _load = () => new Promise((accept, reject) => {
           if (!err) {
             const j = JSON.parse(s);
             db = j;
+            db.blocks = db.blocks.map(b => Block.from(b));
+            db.charges = db.charges.map(b => Message.from(b));
 
             accept();
           } else if (err.code === 'ENOENT') {
