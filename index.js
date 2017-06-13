@@ -1306,7 +1306,7 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     newMemPool,
   };
 };
-const _addBlock = block => {
+const _addBlock = (dbs, blocks, mempool, block) => {
   if (!_checkBlockExists(blocks, mempool, block)) {
     const attachPoint = _findBlockAttachPoint(blocks, mempool, block);
 
@@ -1314,7 +1314,7 @@ const _addBlock = block => {
       const {type} = attachPoint;
 
       if (type === 'mainChain') {
-        const db = _getLatestDb();
+        const db = dbs[dbs.length - 1];
         const error = block.verify(db, blocks);
         if (!error) {
           const {newDb, newMempool} = _commitMainChainBlock(db, blocks, mempool, block);
@@ -1336,10 +1336,10 @@ const _addBlock = block => {
       } else if (type === 'sideChain') {
         const {forkedBlock, sideChainBlocks} = attachPoint;
 
-        const db = _getLatestDb();
+        const db = dbs[dbs.length - 1];
         const error = block.verify(db, sideChainBlocks);
         if (!error) {
-          const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks);
+          const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(dbs, blocks, mempool, block, forkedBlock, sideChainBlocks);
           dbs = newDbs;
           while (dbs.length > UNDO_HEIGHT) {
             dbs.shift();
@@ -1394,7 +1394,6 @@ const _addBlock = block => {
   }
 };
 const _addMessage = (db, blocks, mempool, message) => {
-  const db = _getLatestDb();
   const error = message.verify(db, blocks, mempool);
   if (!error) {
     if (!mempool.messages.some(message => message.equals(message))) {
@@ -2348,7 +2347,7 @@ const _sync = () => {
         switch (type) {
           case 'block': {
             const {block} = m;
-            const error = _addBlock(block);
+            const error = _addBlock(dbs, blocks, mempool, block);
             if (error) {
               console.warn('add remote block error:', err);
             }
@@ -2391,7 +2390,7 @@ const _sync = () => {
       const _addBlocks = () => {
         for (let i = 0; i < remoteBlocks.length; i++) {
           const block = remoteBlocks[i];
-          const error = _addBlock(block);
+          const error = _addBlock(dbs, blocks, mempool, block);
           if (error) {
             console.warn(error);
           }
@@ -2403,7 +2402,7 @@ const _sync = () => {
 
         for (let i = 0; i < blocks.length; i++) {
           const block = Block.from(blocks[i]);
-          const error = _addBlock(block);
+          const error = _addBlock(dbs, blocks, mempool, block);
           if (error) {
             console.warn(error);
           }
