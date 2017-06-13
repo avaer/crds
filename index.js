@@ -101,21 +101,28 @@ class Block {
     return hasher.digest('hex');
   }
 
-  verify(db, blocks, mempool = null) { // XXX this needs to check against a previous block
+  verify(db, blocks, mempool = null) {
     const _checkHash = () => this.getHash() === this.hash;
     const _checkDifficulty = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
+    const _checkPrevHash = () => {
+      if (blocks.length > 0) {
+        return this.prevHash === blocks[blocks.length - 1].hash;
+      } else {
+        return this.prevHash === zeroHash;
+      }
+    };
     const _checkMessages = () => Promise.all(messages.map(message => message.verify(db, blocks, mempool)));
 
     const checks = [
       _checkHash,
       _checkDifficulty,
+      _checkPrevHash,
       _checkMessages,
     ];
     for (let i = 0; i < checks.length; i++) {
       const check = checks[i];
       const error = check();
-
-      if (error !== null) {
+      if (error) {
         return error;
       }
     }
@@ -328,6 +335,7 @@ const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf
 const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
 const difficulty = 1e5;
 const target = _getDifficultyTarget(difficulty);
+const zeroHash = bigint(0).toString(16);
 
 const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
 const _getConfirmedBalance = (db, address, asset) => {
@@ -1313,7 +1321,7 @@ let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
   const version = BLOCK_VERSION;
   const timestamp = Date.now();
-  const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : bigint(0).toString(16);
+  const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const height = blocks.length + 1;
   const payload = JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), startHeight: height, timestamp: Date.now()});
   const signature = null;
