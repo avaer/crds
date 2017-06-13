@@ -619,7 +619,8 @@ const difficulty = 1e5;
 const target = _getDifficultyTarget(difficulty);
 const zeroHash = bigint(0).toString(16);
 
-const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
+const _getAllConfirmedBalances = db => _clone(db.balances);
+const _getConfirmedBalances = (db, address) => _clone(db.balances[address] || {});
 const _getConfirmedBalance = (db, address, asset) => {
   let balance = (db.balances[address] || {})[asset];
   if (balance === undefined) {
@@ -627,8 +628,8 @@ const _getConfirmedBalance = (db, address, asset) => {
   }
   return balance;
 };
-const _getUnconfirmedBalances = (db, mempool, address) => {
-  let result = _getConfirmedBalances(db, address);
+const _getAllUnconfirmedBalances = (db, mempool) => {
+  const result = _getAllConfirmedBalances(db);
 
   for (let i = 0; i < mempool.messages.length; i++) {
     const message = mempool.messages[i];
@@ -687,6 +688,60 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       }
       assetEntry += 1;
       addressEntry[mintAsset] = assetEntry;
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedBalances = (db, mempool, address) => {
+  let result = _getConfirmedBalances(db, address);
+
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'coinbase') {
+      const {asset, quantity, address: localAddress} = payloadJson;
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = assetEntry + quantity;
+      }
+    } else if (type === 'send') {
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
+
+      if (srcAddress === address) {
+        let srcAssetEntry = result[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[asset] = srcAssetEntry - quantity;
+      }
+
+      if (dstAddress === address) {
+        let dstAssetEntry = result[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[asset] = dstAssetEntry + quantity;
+      }
+    } else if (type === 'minter') {
+      const {address: localAddress, asset} = payloadJson;
+
+      if (localAddress === address) {
+        const mintAsset = asset + ':mint';
+
+        let assetEntry = result[mintAsset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        assetEntry += 1;
+        result[mintAsset] = assetEntry;
+      }
     }
   }
 
@@ -2494,17 +2549,17 @@ const _listen = () => {
 
           if (address && asset) {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const balance = _getConfirmedBalance(db, address, asset);
+            const balance = _getUnconfirmedBalance(db, mempool, address, asset);
             console.log(JSON.stringify(balance, null, 2));
             process.stdout.write('> ')
           } else if (address) {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const balances = _getConfirmedBalances(db, address);
+            const balances = _getUnconfirmedBalances(db, mempool, address);
             console.log(JSON.stringify(balances, null, 2));
             process.stdout.write('> ');
           } else {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            console.log(JSON.stringify(db.balances, null, 2));
+            console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
             process.stdout.write('> ');
           }
 
