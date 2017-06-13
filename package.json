@@ -6,7 +6,7 @@
   "dependencies": {
     "big-integer": "^1.6.23",
     "body-parser": "^1.17.2",
-    "eccrypto": "^1.0.3",
+    "eccrypto-sync": "0.0.1",
     "express": "^4.15.3",
     "mkdirp": "^0.5.1",
     "repl.history": "^0.1.4",

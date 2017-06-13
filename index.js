@@ -16,7 +16,7 @@ const ws = require('ws');
 const writeFileAtomic = require('write-file-atomic');
 const replHistory = require('repl.history');
 const bigint = require('big-integer');
-const eccrypto = require('eccrypto');
+const eccrypto = require('eccrypto-sync');
 
 const WORK_TIME = 20;
 const CHARGE_SETTLE_BLOCKS = 100;
@@ -55,7 +55,7 @@ class Block {
     return this.hash === block.hash;
   }
 
-  verify() {
+  verify() { // XXX make this synchronous
     const {hash, prevHash, messages} = this;
 
     const _checkHash = () => {
@@ -102,28 +102,32 @@ class Message {
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
         const signatureBuffer = new Buffer(signature, 'base64');
 
-        return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)
-          .then(() => {
-            if (confirmed) {
-              if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) { // XXX these need to also consider contents of the current block
-                return Promise.resolve();
-              } else {
-                return Promise.reject({
-                  status: 400,
-                  error: 'insufficient funds',
-                });
-              }
+        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+          if (confirmed) {
+            if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) { // XXX these need to also consider contents of the current block
+              return null;
             } else {
-              if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-                return Promise.resolve();
-              } else {
-                return Promise.reject({
-                  status: 400,
-                  error: 'insufficient funds',
-                });
-              }
+              return {
+                status: 400,
+                error: 'insufficient funds',
+              };
             }
-          });
+          } else {
+            if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+              return null;
+            } else {
+              return {
+                status: 400,
+                error: 'insufficient funds',
+              };
+            }
+          }
+        } else {
+          return {
+            status: 400,
+            error: 'invalid signature',
+          };
+        }
       }
       case 'minter': {
         const {asset, quantity, address} = payloadJson;
@@ -132,19 +136,23 @@ class Message {
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
         const signatureBuffer = new Buffer(signature, 'base64');
 
-        return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)
-          .then(() => {
-            const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+          const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
-            if (minter === undefined) {
-              return Promise.resolve();
-            } else {
-              return Promise.reject({
-                status: 400,
-                stack: 'asset is already minted',
-              });
-            }
-          });
+          if (minter === undefined) {
+            return null;
+          } else {
+            return {
+              status: 400,
+              stack: 'asset is already minted',
+            };
+          }
+        } else {
+          return {
+            status: 400,
+            error: 'invalid signature',
+          };
+        }
       }
       case 'mint': {
         const {asset, quantity, address} = payloadJson;
@@ -153,19 +161,23 @@ class Message {
         const payloadHash = crypto.createHash('sha256').update(payload).digest();
         const signatureBuffer = new Buffer(signature, 'base64');
 
-        return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)
-          .then(() => {
-            const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+          const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
-            if (minter === address) {
-              return Promise.resolve();
-            } else {
-              return Promise.reject({
-                status: 400,
-                stack: 'address is not minter of this asset',
-              });
-            }
-          });
+          if (minter === address) {
+            return null;
+          } else {
+            return {
+              status: 400,
+              stack: 'address is not minter of this asset',
+            };
+          }
+        } else {
+          return {
+            status: 400,
+            error: 'invalid signature',
+          };
+        }
       }
       case 'charge': {
         const {asset, quantity, srcAddress} = payloadJson;
@@ -174,23 +186,19 @@ class Message {
           if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
             return Promise.resolve();
           } else {
-            return Promise.reject({
+            return {
               status: 400,
               stack: 'insufficient funds',
-            });
+            };
           }
         } else {
           if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-            const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
-            const message = new Message(payload, null);
-            _addLocalMessage(message);
-
-            return Promise.resolve();
+            return null;
           } else {
-            return Promise.reject({
+            return {
               status: 400,
               stack: 'insufficient funds',
-            });
+            };
           }
         }
       }
@@ -206,36 +214,21 @@ class Message {
 
           const _checkSignature = publicKey => {
             const publicKeyBuffer = new Buffer(publicKey, 'base64');
-            return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)
-              .then(() => {
-                return Promise.resolve(true);
-              })
-              .catch(err => {
-                return Promise.resolve(false);
-              });
+            return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer);
           };
-          Promise.all([
-            _checkSignature(srcAddress),
-            _checkSignature(dstAddress),
-          ])
-            .then(signatureChecks => {
-              if (signatureChecks.some(signatureCheck => Boolean(signatureCheck))) {
-                return Promise.resolve();
-              } else {
-                return Promise.reject({
-                  status: 400,
-                  error: 'invalid signature',
-                });
-              }
-            })
-            .then(() => {
-              _addLocalMessage(message);
-            });
+          if (_checkSignature(srcAddress) && _checkSignature(dstAddress)) {
+            return null;
+          } else {
+            return {
+              status: 400,
+              error: 'invalid signature',
+            };
+          }
         } else {
-          return Promise.reject({
+          return {
             status: 400,
             stack: 'no such charge to chargeback',
-          });
+          };
         }
       }
       default: {
@@ -1567,6 +1560,7 @@ const _listen = () => {
     if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
       const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
       const message = new Message(payload, null);
+
       _addLocalMessage(message);
 
       return Promise.resolve();
@@ -1612,6 +1606,7 @@ const _listen = () => {
       .then(signature => {
         const signatureString = signature.toString('base64');
         const message = new Message(payload, signatureString);
+
         _addLocalMessage(message);
       });
   };
