@@ -301,7 +301,7 @@ const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqe
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
 const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4= */
 
-// const _clone = o => JSON.parse(JSON.stringify(o));
+const _clone = o => JSON.parse(JSON.stringify(o));
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
@@ -906,20 +906,19 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
 
   if (((height - 1) >= (blocks.length - UNDO_HEIGHT)) && ((height - 1) < blocks.length)) {
-    const candidateMainChainBlock = blocks[height - 1];
+    const candidateMainChainBlock = blocks[blocks.length - 1];
 
-    if (candidateMainChainBlock.hash === prevHash && candidateMainChainBlock.height === (height - 1)) {
+    if (candidateMainChainBlock.hash === prevHash) {
       return { // valid on main chain
         type: 'mainChain',
-        prevBlock: candidateMainChainBlock,
       };
     } else {
-      const candidateSideChainBlock = mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash && mempoolBlock.height === height);
+      const candidateSideChainBlock = mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash && mempoolBlock.height === (height - 1));
 
       if (candidateSideChainBlock) {
         return { // valid side chain
           type: 'sideChain',
-          prevBlock: candidateSideChainBlock,
+          prevBlock: candidateSideChainBlock, // XXX return the chain leading up to this block for verification
         };
       } else {
         return null; // in range, invalid previous hash
@@ -941,6 +940,8 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
 };
 
 const _commitMainChainBlock = (db, blocks, mempool, block) => {
+  const newDb = _clone(db);
+
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
@@ -950,10 +951,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     if (type === 'coinbase') {
       const {asset, quantity, dstAddress} = payloadJson;
 
-      let dstAddressEntry = db.balances[dstAddress];
+      let dstAddressEntry = newDb.balances[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
-        db.balances[dstAddress] = dstAddressEntry;
+        newDb.balances[dstAddress] = dstAddressEntry;
       }
       let dstAssetEntry = dstAddressEntry[asset];
       if (dstAssetEntry === undefined) {
@@ -964,10 +965,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
-      let srcAddressEntry = db.balances[srcAddress];
+      let srcAddressEntry = newDb.balances[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
-        db.balances[srcAddress] = srcAddressEntry;
+        newDb.balances[srcAddress] = srcAddressEntry;
       }
       let srcAssetEntry = srcAddressEntry[asset];
       if (srcAssetEntry === undefined) {
@@ -976,10 +977,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       srcAssetEntry -= quantity;
       srcAddressEntry[asset] = srcAssetEntry;
 
-      let dstAddressEntry = db.balances[dstAddress];
+      let dstAddressEntry = newDb.balances[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
-        db.balances[dstAddress] = dstAddressEntry;
+        newDb.balances[dstAddress] = dstAddressEntry;
       }
       let dstAssetEntry = dstAddressEntry[asset];
       if (dstAssetEntry === undefined) {
@@ -989,15 +990,15 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       dstAddressEntry[asset] = dstAssetEntry;
 
       if (/:mint$/.test(asset)) {
-        db.minters[asset] = dstAddress;
+        newDb.minters[asset] = dstAddress;
       }
     } else if (type === 'charge') { // XXX disallow mint assets here
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
-      let srcAddressEntry = db.balances[srcAddress];
+      let srcAddressEntry = newDb.balances[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
-        db.balances[srcAddress] = srcAddressEntry;
+        newDb.balances[srcAddress] = srcAddressEntry;
       }
       let srcAssetEntry = srcAddressEntry[asset];
       if (srcAssetEntry === undefined) {
@@ -1006,10 +1007,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       srcAssetEntry -= quantity;
       srcAddressEntry[asset] = srcAssetEntry;
 
-      let dstAddressEntry = db.balances[dstAddress];
+      let dstAddressEntry = newDb.balances[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
-        db.balances[dstAddress] = dstAddressEntry;
+        newDb.balances[dstAddress] = dstAddressEntry;
       }
       let dstAssetEntry = dstAddressEntry[asset];
       if (dstAssetEntry === undefined) {
@@ -1021,10 +1022,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       const {asset, address} = payloadJson;
       const mintAsset = asset + ':mint';
 
-      let addressEntry = db.balances[address];
+      let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
         addressEntry = {};
-        db.balances[address] = addressEntry;
+        newDb.balances[address] = addressEntry;
       }
       let assetEntry = addressEntry[mintAsset];
       if (assetEntry === undefined) {
@@ -1033,14 +1034,14 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       assetEntry += 1;
       addressEntry[mintAsset] = assetEntry;
 
-      db.minters[asset] = address;
+      newDb.minters[asset] = address;
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
-      let addressEntry = db.balances[address];
+      let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
         addressEntry = {};
-        db.balances[address] = addressEntry;
+        newDb.balances[address] = addressEntry;
       }
       let assetEntry = addressEntry[asset];
       if (assetEntry === undefined) {
@@ -1108,13 +1109,8 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     }
   }
 
-  // add block
-  db.blocks.push(block);
-
-  // emit the new block to listening peers
-  api.emit('block', block);
-
   // remove old messages from the mempool
+  // XXX move this outside of this function
   for (let i = 0; i < block.messages.length; i++) {
     const blockMessage = block.messages[i];
     const mempoolMessageIndex = mempool.messages.findIndex(mempoolMessage => mempoolMessage.equals(blockMessage));
@@ -1125,6 +1121,11 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   }
 
   // XXX expire invalid messages
+  // XXX move that outside of this function
+
+  return {
+    newDb,
+  };
 };
 const _commitSideChainBlock = (db, blocks, mempool, block) => {
   // add block to mempool
@@ -1216,9 +1217,21 @@ const _addBlock = block => {
       const {type} = attachPoint;
 
       if (type === 'mainChain') {
-        const {prevBlock} = attachPoint; // XXX verify the block first and return the error
+        const db = _getLatestDb();
+        const error = block.verify(db, blocks);
+        if (!error) {
+          const {newDb} = _commitMainChainBlock(db, blocks, mempool, block);
+          dbs.push(newDb);
+          blocks.push(block);
 
-        _commitMainChainBlock(db, blocks, mempool, block);
+          _save();
+
+          api.emit('block', block);
+
+          return null;
+        } else {
+          return error;
+        }
       } else if (type === 'sideChain') {
         const {prevBlock} = attachPoint; // XXX verify the block first and return the error
 
@@ -1674,7 +1687,7 @@ const _listen = () => {
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
-    if (error === null) {
+    if (!error) {
       _addMessage(message);
 
       return Promise.resolve();
@@ -1719,7 +1732,7 @@ const _listen = () => {
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
-    if (error === null) {
+    if (!error) {
       _addMessage(message);
 
       return Promise.resolve();
@@ -1762,7 +1775,7 @@ const _listen = () => {
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
-    if (error === null) {
+    if (!error) {
       _addMessage(message);
 
       return Promise.resolve();
@@ -1802,7 +1815,7 @@ const _listen = () => {
     const message = new Message(payload, null);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
-    if (error === null) {
+    if (!error) {
       _addMessage(message);
 
       return Promise.resolve();
@@ -1845,7 +1858,7 @@ const _listen = () => {
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
-    if (error === null) {
+    if (!error) {
       _addMessage(message);
 
       return Promise.resolve();
