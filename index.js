@@ -1495,7 +1495,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
 
   const newMempool = mempool && {
     blocks: mempool.blocks.filter(mempoolBlock => mempoolBlock.hash !== block.hash),
-    messages: mempool.messages.filter(mempoolMessage => !block.messages.some(blockMessage => blockMessage === mempoolMessage.signature)),
+    messages: mempool.messages.filter(mempoolMessage => !block.messages.some(blockMessage => blockMessage.signature === mempoolMessage.signature)),
   };
 
   return {
