@@ -112,22 +112,47 @@ class Block {
         return this.prevHash === zeroHash;
       }
     };
-    const _checkMessages = () => Promise.all(messages.map(message => message.verify(db, blocks, mempool)));
+    const _checkHeight = () => this.height === (blocks.length + 1);
+    const _verifyMessages = () => {
+      for (let i = 0; i < this.messages.length; i++) {
+        const message = this.messages[i];
+        const error = message.verify(db, blocks, mempool);
+        if (error) {
+          return error;
+        }
+      }
+      return null;
+    };
 
-    const checks = [
-      _checkHash,
-      _checkDifficulty,
-      _checkPrevHash,
-      _checkMessages,
-    ];
-    for (let i = 0; i < checks.length; i++) {
-      const check = checks[i];
-      const error = check();
-      if (error) {
+    if (!_checkHash()) {
+      return {
+        status: 400,
+        error: 'invalid hash',
+      };
+    } else if (!_checkDifficulty()) {
+      return {
+        status: 400,
+        error: 'invalid difficulty',
+      };
+    } else if (!_checkPrevHash()) {
+      return {
+        status: 400,
+        error: 'invalid previous hash',
+      };
+    } else if (!_checkHeight()) {
+      return {
+        status: 400,
+        error: 'invalid height',
+      };
+    } else {
+      const error = _verifyMessages();
+
+      if (!error) {
+        return null;
+      } else {
         return error;
       }
     }
-    return null;
   }
 }
 class Message {
@@ -351,7 +376,7 @@ class Peer {
               }
               case 'message': {
                 const {message} = m;
-                const db = dbs[dbs.length - 1];
+                const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
                 const error = _addMessage(db, blocks, mempool, message);
                 if (error) {
                   console.warn('add remote message error:', err);
@@ -457,7 +482,7 @@ class Peer {
             }
             for (let i = 0; i < messages.length; i++) {
               const message = Message.from(messages[i]);
-              const db = dbs[dbs.length - 1];
+              const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
               const error = _addMessage(db, blocks, mempool, message);
               if (error) {
                 console.warn(error);
@@ -1502,7 +1527,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
       const {type} = attachPoint;
 
       if (type === 'mainChain') {
-        const db = dbs[dbs.length - 1];
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
         const error = block.verify(db, blocks);
         if (!error) {
           const {newDb, newMempool} = _commitMainChainBlock(db, blocks, mempool, block);
@@ -1524,7 +1549,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
       } else if (type === 'sideChain') {
         const {forkedBlock, sideChainBlocks} = attachPoint;
 
-        const db = dbs[dbs.length - 1];
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
         const error = block.verify(db, sideChainBlocks);
         if (!error) {
           const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(dbs, blocks, mempool, block, forkedBlock, sideChainBlocks);
@@ -2044,25 +2069,25 @@ const _listen = () => {
 
   app.get('/balances/:address', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalances(db, address);
     res.json({balance});
   });
   app.get('/balance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalance(db, address, asset);
     res.json({balance});
   });
   app.get('/unconfirmedBalances/:address', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedUnsettledBalances(db, address);
     res.json({balance});
   });
   app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedUnsettledBalance(db, address, asset);
     res.json({balance});
   });
@@ -2075,7 +2100,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -2119,7 +2144,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -2161,7 +2186,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -2200,7 +2225,7 @@ const _listen = () => {
   const _createCharge = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp}) => {
     const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, startHeight, timestamp});
     const message = new Message(payload, null);
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -2242,7 +2267,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = dbs[dbs.length - 1];
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
