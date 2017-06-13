@@ -934,22 +934,33 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
 
   if (((height - 1) >= (blocks.length - UNDO_HEIGHT)) && ((height - 1) < blocks.length)) {
-    const candidateMainChainBlock = blocks[blocks.length - 1];
+    const candidateTopMainChainBlock = blocks[blocks.length - 1];
 
-    if (candidateMainChainBlock.hash === prevHash) {
+    if (candidateTopMainChainBlock.hash === prevHash) {
       return { // valid on main chain
         type: 'mainChain',
       };
     } else {
-      const candidateSideChainBlock = mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash && mempoolBlock.height === (height - 1));
+      const forkedBlock = _getBlockForkOrigin(blocks, mempool, block);
 
-      if (candidateSideChainBlock) {
-        return { // valid side chain
+      if (forkedBlock) {
+        const extraBlocks = (() => {
+          const result = [];
+          for (let b = block; b.hash !== forkedBlock.hash; b = mempool.blocks.find(mempoolBlock => mempoolBlock.hash === b.prevHash)) {
+            result.unshift(b);
+          }
+          return result;
+        })();
+
+        return { // valid indirect side chain
           type: 'sideChain',
-          prevBlock: candidateSideChainBlock, // XXX return the chain leading up to this block for verification
+          forkedBlock: forkedBlock,
+          sideChainBlocks: blocks.slice(0, forkedBlock.height).concat(extraBlocks),
         };
       } else {
-        return null; // in range, invalid previous hash
+        return {
+          type: 'dangling',
+        };
       }
     }
   } else {
@@ -965,6 +976,50 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
       };
     }
   }
+};
+const _getBlockForkOrigin = (blocks, mempool, block) => {
+  const _getPreviousMainChainBlock = block => {
+    const {prevHash, height} = block;
+
+    if (((height - 1) >= 0) && ((height - 1) < blocks.length)) {
+      const candidateMainChainBlock = blocks[height - 1];
+
+      if (candidateMainChainBlock.hash === prevHash) {
+        return candidateMainChainBlock;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  };
+  const _getPreviousMempoolBlock = block => {
+    const {prevHash} = block;
+    return mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash) || null;
+  };
+  const forkedBlock = (() => {
+    let b = block;
+
+    for (;;) {
+      const previousMainChainBlock = _getPreviousMainChainBlock(b);
+
+      if (previousMainChainBlock !== null) {
+        return previousMainChainBlock;
+      } else {
+        const previousMempoolBlock = _getPreviousMempoolBlock(b);
+
+        if (previousMempoolBlock !== null) {
+          b = previousMempoolBlock;
+
+          continue;
+        } else {
+          return null;
+        }
+      }
+    }
+  })();
+
+  return forkedBlock;
 };
 
 const _commitMainChainBlock = (db, blocks, mempool, block) => {
@@ -1161,53 +1216,14 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     newDb,
   };
 };
-const _commitSideChainBlock = (db, blocks, mempool, block) => {
+const _commitSideChainBlock = (db, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
   // add block to mempool
   if (!mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash)) {
     mempool.blocks.push(block);
   }
 
   // consider sidechain reorg
-  const _getPreviousMainChainBlock = block => {
-    const {prevHash, height} = block;
-
-    if (((height - 1) >= 0) && ((height - 1) < blocks.length)) {
-      const candidateMainChainBlock = blocks[height - 1];
-
-      if (candidateMainChainBlock.hash === prevHash) {
-        return candidateMainChainBlock;
-      } else {
-        return null;
-      }
-    } else {
-      return null;
-    }
-  };
-  const _getPreviousMempoolBlock = block => {
-    const {prevHash} = block;
-    return mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash) || null;
-  };
-  const forkedBlock = (() => {
-    let b = block;
-
-    for (;;) {
-      const previousMainChainBlock = _getPreviousMainChainBlock(b);
-
-      if (previousMainChainBlock !== null) {
-        return previousMainChainBlock;
-      } else {
-        const previousMempoolBlock = _getPreviousMempoolBlock(b);
-
-        if (previousMempoolBlock !== null) {
-          b = previousMempoolBlock;
-
-          continue;
-        } else {
-          return null;
-        }
-      }
-    }
-  })();
+  const forkedBlock = _getForkedBlock(blocks, mempool, block);
   const {height: forkedBlockHeight} = forkedBlock;
 
   const _getBlocksDifficulty = blocks => {
@@ -1267,9 +1283,15 @@ const _addBlock = block => {
           return error;
         }
       } else if (type === 'sideChain') {
-        const {prevBlock} = attachPoint; // XXX verify the block first and return the error
+        const {forkedBlock, sideChainBlocks} = attachPoint;
 
-        _commitSideChainBlock(db, blocks, mempool, block);
+        const db = _getLatestDb();
+        const error = block.verify(db, sideChainBlocks);
+        if (!error) {
+          _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks); // XXX return updates to save
+        } else {
+          return error;
+        }
       } else if (type === 'outOfRange') {
         const {direction} = attachPoint;
 
@@ -1284,6 +1306,11 @@ const _addBlock = block => {
             error: 'desynchronized block',
           };
         }
+      } else if (type === 'dangling') {
+        return {
+          status: 400,
+          error: 'dangling block',
+        };
       } else {
         return {
           status: 400,
