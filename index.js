@@ -74,7 +74,7 @@ class Block {
       .map(message => JSON.stringify(message))
       .join('\n');
 
-    const uint64Array = new Uint64Array(1);
+    const uint64Array = new Uint32Array(1);
     const hashRoot = (() => {
       const hasher = crypto.createHash('sha256');
       hasher.update(prevHash);
@@ -1600,7 +1600,7 @@ const doHash = () => new Promise((accept, reject) => {
   const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const height = blocks.length + 1;
-  const payload = JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), startHeight: height, timestamp: Date.now()});
+  const payload = JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: minePublicKey, startHeight: height, timestamp: Date.now()});
   const signature = null;
   const coinbaseMessage = new Message(payload, signature);
   const allMessages = mempool.messages.concat(coinbaseMessage);
@@ -1608,7 +1608,7 @@ const doHash = () => new Promise((accept, reject) => {
     .map(message => JSON.stringify(message))
     .join('\n');
 
-  const uint64Array = new Uint64Array(1);
+  const uint64Array = new Uint32Array(1);
   const hashRoot = (() => {
     const hasher = crypto.createHash('sha256');
     hasher.update(prevHash);
@@ -2488,18 +2488,23 @@ const _listen = () => {
           break;
         }
         case 'mine': {
-          const [, flag] = split;
+          console.log(minePublicKey !== null);
+          process.stdout.write('> ');
 
-          if (flag === String(true)) {
-            _startMine();
-            process.stdout.write('> ');
-          } else if (flag === String(false)) {
-            _stopMine();
-            process.stdout.write('> ');
-          } else {
-            console.log(mineImmediate !== null);
-            process.stdout.write('> ');
-          }
+          break;
+        }
+        case 'startmine': {
+          const [, publicKey] = split;
+
+          _startMine(publicKey);
+          process.stdout.write('> ');
+
+          break;
+        }
+        case 'stopmine': {
+          _stopMine();
+          process.stdout.write('> ');
+
           break;
         }
         case 'peers': {
@@ -2551,6 +2556,7 @@ const _listen = () => {
   });
 };
 
+let minePublicKey = null;
 let mineImmediate = null;
 const _mine = () => {
   doHash()
@@ -2570,10 +2576,13 @@ const _mine = () => {
       mineImmediate = setImmediate(_mine);
     });
 };
-const _startMine = () => {
+const _startMine = publicKey => {
+  minePublicKey = publicKey;
   mineImmediate = setImmediate(_mine);
 };
 const _stopMine = () => {
+  minePublicKey = null;
+
   clearImmediate(mineImmediate);
   mineImmediate = null;
 };
