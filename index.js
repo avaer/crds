@@ -1663,7 +1663,8 @@ const _addBlock = (dbs, blocks, mempool, block) => {
             dbs.shift();
           }
           blocks.push(block);
-          mempool = newMempool;
+          mempool.blocks = newMempool.blocks;
+          mempool.messages = newMempool.messages;
 
           _saveState();
 
@@ -1685,7 +1686,8 @@ const _addBlock = (dbs, blocks, mempool, block) => {
             dbs.shift();
           }
           blocks = newBlocks;
-          mempool = newMempool;
+          mempool.blocks = newMempool.blocks;
+          mempool.messages = newMempool.messages;
 
           _saveState();
 
