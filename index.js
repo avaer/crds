@@ -1246,17 +1246,20 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
 
   const newDbs = (() => {
     if (needsReorg) {
+      const result = dbs.slice(0, -numSlicedBlocks);
+
       let localDb = (numSlicedBlocks < dbs.length) ? dbs[dbs.length - (numSlicedBlocks + 1)] : DEFAULT_DB;
       let localBlocks = blocks.slice(0, -numSlicedBlocks);
-
       for (let i = 0; i < addedSideChainBlocks; i++) {
         const addedSideChainBlock = addedSideChainBlocks;
         const {newDb} = _commitMainChainBlock(localDb, localBlocks, null, addedSideChainBlock);
         localDb = newDb;
         localBlocks.push(addedSideChainBlock);
+
+        result.push(localDb);
       }
 
-      return localDb;
+      return result;
     } else {
       return dbs.slice();
     }
@@ -1300,6 +1303,9 @@ const _addBlock = block => {
         if (!error) {
           const {newDb, newMempool} = _commitMainChainBlock(db, blocks, mempool, block);
           dbs.push(newDb);
+          while (dbs.length > UNDO_HEIGHT) {
+            dbs.shift();
+          }
           blocks.push(block);
           mempool = newMempool;
 
@@ -1319,6 +1325,9 @@ const _addBlock = block => {
         if (!error) {
           const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks);
           dbs = newDbs;
+          while (dbs.length > UNDO_HEIGHT) {
+            dbs.shift();
+          }
           blocks = newBlocks;
           mempool = newMempool;
 
