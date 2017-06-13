@@ -1199,21 +1199,14 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     newDb.messageRevocations.shift();
   }
 
-  // remove old messages from the mempool
-  // XXX move this outside of this function
-  for (let i = 0; i < block.messages.length; i++) {
-    const blockMessage = block.messages[i];
-    const mempoolMessageIndex = mempool.messages.findIndex(mempoolMessage => mempoolMessage.equals(blockMessage));
-
-    if (mempoolMessageIndex !== -1) {
-      mempool.messages.splice(mempoolMessageIndex, 1);
-    }
-  }
-
-  // XXX return new mempool
+  const newMempool = {
+    blocks: mempool.blocks.filter(mempoolBlock => mempoolBlock.hash !== block.hash),
+    messages: mempool.messages.filter(mempoolMessage => !block.messages.some(blockMessage => blockMessage === mempoolMessage.signature)),
+  };
 
   return {
     newDb,
+    newMempool,
   };
 };
 const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
@@ -1266,9 +1259,10 @@ const _addBlock = block => {
         const db = _getLatestDb();
         const error = block.verify(db, blocks);
         if (!error) {
-          const {newDb} = _commitMainChainBlock(db, blocks, mempool, block); // XXX return new mempool here
+          const {newDb, newMempool} = _commitMainChainBlock(db, blocks, mempool, block);
           dbs.push(newDb);
           blocks.push(block);
+          mempool = newMempool;
 
           _save();
 
