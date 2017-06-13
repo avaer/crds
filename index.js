@@ -1024,6 +1024,7 @@ const _getBlockForkOrigin = (blocks, mempool, block) => {
 
 const _commitMainChainBlock = (db, blocks, mempool, block) => {
   const newDb = _clone(db);
+  _decorateDb(newDb);
 
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
@@ -1209,55 +1210,50 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     }
   }
 
-  // XXX expire invalid messages
-  // XXX move that outside of this function
+  // XXX return new mempool
 
   return {
     newDb,
   };
 };
-const _commitSideChainBlock = (db, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
-  // add block to mempool
-  if (!mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash)) {
-    mempool.blocks.push(block);
-  }
-
-  // consider sidechain reorg
-  const forkedBlock = _getForkedBlock(blocks, mempool, block);
-  const {height: forkedBlockHeight} = forkedBlock;
-
+const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
   const _getBlocksDifficulty = blocks => {
     let result = 0;
-
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
       const {hash} = block;
-
       result += _getHashDifficulty(hash, target);
     }
-
     return result;
   };
-  const _getSideChainBlocks = (block, forkedBlock) => {
-    const result = [block];
+  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlock.height - 1));
+  const sideChainDifficulty = _getBlocksDifficulty(sideChainBlocks.slice(forkedBlock.height - 1));
+  const needsReorg = sideChainDifficulty > mainChainDifficulty;
 
-    let b = block;
-    for (;;) {
-      const prevBlock = _getPreviousMempoolBlock(b) || _getPreviousMempoolBlock(b);
-
-      result.push(prevBlock);
-
-      if (prevBlock.hash === forkedBlock.hash) {
-        break;
-      }
+  const newDbs = (() => {
+    if (needsReorg) {
+      // XXX
+    } else {
+      return dbs.slice();
     }
-    return result;
+  })();
+  const newBlocks = needsReorg ? sideChainBlocks.slice() : blocks.slice();
+  const newMempool = (() => {
+    if (needsReorg) {
+      // XXX
+    } else {
+      return {
+        blocks: mempool.blocks.concat(block),
+        messages: mempool.messages.slice(),
+      };
+    }
+  })();
+
+  return {
+    newDbs,
+    newBlocks,
+    newMemPool,
   };
-  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlockHeight - 1));
-  const sideChainDifficulty = _getBlocksDifficulty(_getSideChainBlocks(block, forkedBlock));
-  if (sideChainDifficulty > mainChainDifficulty) {
-    // XXX reorg
-  }
 };
 const _addBlock = block => {
   if (!_checkBlockExists(blocks, mempool, block)) {
@@ -1270,7 +1266,7 @@ const _addBlock = block => {
         const db = _getLatestDb();
         const error = block.verify(db, blocks);
         if (!error) {
-          const {newDb} = _commitMainChainBlock(db, blocks, mempool, block);
+          const {newDb} = _commitMainChainBlock(db, blocks, mempool, block); // XXX return new mempool here
           dbs.push(newDb);
           blocks.push(block);
 
@@ -1288,7 +1284,16 @@ const _addBlock = block => {
         const db = _getLatestDb();
         const error = block.verify(db, sideChainBlocks);
         if (!error) {
-          _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks); // XXX return updates to save
+          const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks);
+          dbs = newDbs;
+          blocks = newBlocks;
+          mempool = newMempool();
+
+          _save();
+
+          api.emit('block', block);
+
+          return null;
         } else {
           return error;
         }
