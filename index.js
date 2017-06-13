@@ -300,7 +300,7 @@ const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqe
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
 const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4= */
 
-const _clone = o => JSON.parse(JSON.stringify(o));
+// const _clone = o => JSON.parse(JSON.stringify(o));
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
@@ -1376,32 +1376,60 @@ const _load = () => {
           }
         }
       })();
-      const candidateHeights = (() => {
-        const result = [];
 
-        const _haveDbFile = height => dbFiles.some(file => {
-          const match = file.match(/^db-([0-9]+)\.json$/);
-          return Boolean(match) && parseInt(match[1], 10) === height;
-        });
-        for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
-          result.push(i);
-        }
-        return result;
-      })();
+      if (bestBlockHeight > 0) { // load dbs and blocks from disk
+        const _readDbFiles = {
+          const candidateHeights = (() => {
+            const result = [];
 
-      if (candidateHeights.length > 0) { // load dbs and blocks from disk
-        const _readDbFiles = candidateHeights.map(height => _readDbFile(height));
-        const _readDbFile = height => new Promise((accept, reject) => {
-          fs.readFile(path.join(dbDataPath, `db-${height}.json`), 'utf8', (err, s) => {
-            if (!err) {
-              const db = JSON.parse(s);
-              _decorateDb(db);
-
-              accept(db);
-            } else {
-              reject(err);
+            const _haveDbFile = height => dbFiles.some(file => {
+              const match = file.match(/^db-([0-9]+)\.json$/);
+              return Boolean(match) && parseInt(match[1], 10) === height;
+            });
+            for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
+              result.push(i);
             }
+            return result;
+          })();
+          const _readDbFile = height => new Promise((accept, reject) => {
+            fs.readFile(path.join(dbDataPath, `db-${height}.json`), 'utf8', (err, s) => {
+              if (!err) {
+                const db = JSON.parse(s);
+                accept(db);
+              } else {
+                reject(err);
+              }
+            });
           });
+          return candidateHeights.map(height => _readDbFile(height))
+        };
+        const _readBlockFiles = () => new Promise((accept, reject) => {
+          const blocks = [];
+
+          const _readBlockFile = height => new Promise((accept, reject) => {
+            fs.readFile(path.join(blocksDataPath, `block-${height}.json`), 'utf8', (err, s) => {
+              if (!err) {
+                const block = JSON.parse(s);
+                accept(block);
+              } else {
+                reject(err);
+              }
+            });
+          });
+          const _recurse = height => {
+            if (height <= bestBlockHeight) {
+              _readBlockFile()
+                .then(block => {
+                  blocks.push(block);
+
+                  _recurse(height + 1);
+                })
+                .catch(reject);
+            } else {
+              accept(blocks);
+            }
+          };
+          _recurse(1);
         });
 
         return Promise.all([
@@ -1413,9 +1441,6 @@ const _load = () => {
             newBlocks,
           ]) => {
             // NOTE: we are assuming no file corruption
-            db = _clone(newDbs[newDbs.length - 1]);
-            _decorateDb(db);
-
             dbs = newDbs;
             _decorateDbs(db);
 
@@ -1423,9 +1448,6 @@ const _load = () => {
             _decorateBlocks(blocks);
           });
       } else { // nothing to salvage; bootstrap db and do a full sync
-        db = _clone(DEFAULT_DB);
-        _decorateDb(db);
-
         dbs = [];
         _decorateDbs(dbs);
 
@@ -1540,7 +1562,7 @@ const _save = (() => {
               if (match) {
                 const height = parseInt(match[1], 10);
 
-                if (height > 0 height <= topBlockHeight) {
+                if (height >= 1 && height <= topBlockHeight) {
                   // nothing
                 } else {
                   _remove();
