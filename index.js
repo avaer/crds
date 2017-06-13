@@ -164,8 +164,8 @@ class Message {
             const signatureBuffer = new Buffer(signature, 'base64');
 
             if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-              if (confirmed) {
-                if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) { // XXX these need to also consider contents of the current block
+              if (!mempool) {
+                if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
                   return null;
                 } else {
                   return {
@@ -198,7 +198,7 @@ class Message {
             const signatureBuffer = new Buffer(signature, 'base64');
 
             if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-              const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+              const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
               if (minter === undefined) {
                 return null;
@@ -223,7 +223,7 @@ class Message {
             const signatureBuffer = new Buffer(signature, 'base64');
 
             if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-              const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+              const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
               if (minter === address) {
                 return null;
@@ -243,7 +243,7 @@ class Message {
           case 'charge': {
             const {asset, quantity, srcAddress} = payloadJson;
 
-            if (confirmed) {
+            if (!mempool) {
               if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
                 return Promise.resolve();
               } else {
@@ -265,7 +265,7 @@ class Message {
           }
           case 'chargeback': {
             const {chargeSignature} = payloadJson;
-            const chargeMessaage = confirmed ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
+            const chargeMessaage = !mempool ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
 
             if (chargeMessaage) {
               const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
@@ -299,7 +299,7 @@ class Message {
       } else {
         return {
           status: 400,
-          error: 'replay',
+          error: 'replay detected',
         };
       }
     } else {
