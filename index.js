@@ -19,12 +19,14 @@ const bigint = require('big-integer');
 const eccrypto = require('eccrypto-sync');
 
 const BLOCK_VERSION = '0.0.1';
-const WORK_TIME = 20;
+const MESSAGE_TTL = 10;
 const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
+const WORK_TIME = 20;
 const DEFAULT_DB = {
   balances: {},
   charges: [],
+  messageRevocations: [],
   minters: {
     'CRD': null,
   },
@@ -138,148 +140,166 @@ class Message {
   verify(db, blocks, mempool = null) {
     const {payload, signature} = this;
     const payloadJson = JSON.parse(payload);
-    const {type} = payloadJson;
+    const {startHeight} = payloadJson;
+    const endHeight = startHeight + MESSAGE_TTL;
+    const height = blocks.length + 1;
 
-    switch (type) {
-      case 'send': {
-        const {asset, quantity, srcAddress} = payloadJson;
-        const publicKey = srcAddress;
-        const publicKeyBuffer = new Buffer(publicKey, 'base64');
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-        const signatureBuffer = new Buffer(signature, 'base64');
+    if (height >= startHeight && height < endHeight) {
+      if (!db.messageRevocations.some(signatures => signatures.includes(signature))) {
+        const {type} = payloadJson;
 
-        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-          if (confirmed) {
-            if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) { // XXX these need to also consider contents of the current block
-              return null;
-            } else {
-              return {
-                status: 400,
-                error: 'insufficient funds',
-              };
-            }
-          } else {
-            if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-              return null;
-            } else {
-              return {
-                status: 400,
-                error: 'insufficient funds',
-              };
-            }
-          }
-        } else {
-          return {
-            status: 400,
-            error: 'invalid signature',
-          };
-        }
-      }
-      case 'minter': {
-        const {asset, quantity, address} = payloadJson;
-        const publicKey = address;
-        const publicKeyBuffer = new Buffer(publicKey, 'base64');
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-        const signatureBuffer = new Buffer(signature, 'base64');
-
-        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-          const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
-
-          if (minter === undefined) {
-            return null;
-          } else {
-            return {
-              status: 400,
-              stack: 'asset is already minted',
-            };
-          }
-        } else {
-          return {
-            status: 400,
-            error: 'invalid signature',
-          };
-        }
-      }
-      case 'mint': {
-        const {asset, quantity, address} = payloadJson;
-        const publicKey = address;
-        const publicKeyBuffer = new Buffer(publicKey, 'base64');
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-        const signatureBuffer = new Buffer(signature, 'base64');
-
-        if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-          const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
-
-          if (minter === address) {
-            return null;
-          } else {
-            return {
-              status: 400,
-              stack: 'address is not minter of this asset',
-            };
-          }
-        } else {
-          return {
-            status: 400,
-            error: 'invalid signature',
-          };
-        }
-      }
-      case 'charge': {
-        const {asset, quantity, srcAddress} = payloadJson;
-
-        if (confirmed) {
-          if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
-            return Promise.resolve();
-          } else {
-            return {
-              status: 400,
-              stack: 'insufficient funds',
-            };
-          }
-        } else {
-          if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-            return null;
-          } else {
-            return {
-              status: 400,
-              stack: 'insufficient funds',
-            };
-          }
-        }
-      }
-      case 'chargeback': {
-        const {chargeSignature} = payloadJson;
-        const chargeMessaage = confirmed ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
-
-        if (chargeMessaage) {
-          const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
-          const {srcAddress, dstAddress} = chargeMessagePayloadJson;
-          const payloadHash = crypto.createHash('sha256').update(payload).digest();
-          const signatureBuffer = new Buffer(signature, 'base64');
-
-          const _checkSignature = publicKey => {
+        switch (type) {
+          case 'send': {
+            const {asset, quantity, srcAddress} = payloadJson;
+            const publicKey = srcAddress;
             const publicKeyBuffer = new Buffer(publicKey, 'base64');
-            return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer);
-          };
-          if (_checkSignature(srcAddress) && _checkSignature(dstAddress)) {
-            return null;
-          } else {
-            return {
-              status: 400,
-              error: 'invalid signature',
-            };
+            const payloadHash = crypto.createHash('sha256').update(payload).digest();
+            const signatureBuffer = new Buffer(signature, 'base64');
+
+            if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              if (confirmed) {
+                if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) { // XXX these need to also consider contents of the current block
+                  return null;
+                } else {
+                  return {
+                    status: 400,
+                    error: 'insufficient funds',
+                  };
+                }
+              } else {
+                if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+                  return null;
+                } else {
+                  return {
+                    status: 400,
+                    error: 'insufficient funds',
+                  };
+                }
+              }
+            } else {
+              return {
+                status: 400,
+                error: 'invalid signature',
+              };
+            }
           }
-        } else {
-          return {
-            status: 400,
-            stack: 'no such charge to chargeback',
-          };
+          case 'minter': {
+            const {asset, quantity, address} = payloadJson;
+            const publicKey = address;
+            const publicKeyBuffer = new Buffer(publicKey, 'base64');
+            const payloadHash = crypto.createHash('sha256').update(payload).digest();
+            const signatureBuffer = new Buffer(signature, 'base64');
+
+            if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+
+              if (minter === undefined) {
+                return null;
+              } else {
+                return {
+                  status: 400,
+                  stack: 'asset is already minted',
+                };
+              }
+            } else {
+              return {
+                status: 400,
+                error: 'invalid signature',
+              };
+            }
+          }
+          case 'mint': {
+            const {asset, quantity, address} = payloadJson;
+            const publicKey = address;
+            const publicKeyBuffer = new Buffer(publicKey, 'base64');
+            const payloadHash = crypto.createHash('sha256').update(payload).digest();
+            const signatureBuffer = new Buffer(signature, 'base64');
+
+            if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              const minter = confirmed ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+
+              if (minter === address) {
+                return null;
+              } else {
+                return {
+                  status: 400,
+                  stack: 'address is not minter of this asset',
+                };
+              }
+            } else {
+              return {
+                status: 400,
+                error: 'invalid signature',
+              };
+            }
+          }
+          case 'charge': {
+            const {asset, quantity, srcAddress} = payloadJson;
+
+            if (confirmed) {
+              if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                return Promise.resolve();
+              } else {
+                return {
+                  status: 400,
+                  stack: 'insufficient funds',
+                };
+              }
+            } else {
+              if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
+                return null;
+              } else {
+                return {
+                  status: 400,
+                  stack: 'insufficient funds',
+                };
+              }
+            }
+          }
+          case 'chargeback': {
+            const {chargeSignature} = payloadJson;
+            const chargeMessaage = confirmed ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
+
+            if (chargeMessaage) {
+              const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
+              const {srcAddress, dstAddress} = chargeMessagePayloadJson;
+              const payloadHash = crypto.createHash('sha256').update(payload).digest();
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              const _checkSignature = publicKey => {
+                const publicKeyBuffer = new Buffer(publicKey, 'base64');
+                return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer);
+              };
+              if (_checkSignature(srcAddress) && _checkSignature(dstAddress)) {
+                return null;
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            } else {
+              return {
+                status: 400,
+                stack: 'no such charge to chargeback',
+              };
+            }
+          }
+          default: {
+            return Promise.reject(new Error('unknown message type: ' + type));
+          }
         }
+      } else {
+        return {
+          status: 400,
+          error: 'replay',
+        };
       }
-      default: {
-        return Promise.reject(new Error('unknown message type: ' + type));
-      }
+    } else {
+      return {
+        status: 400,
+        error: 'ttl expired',
+      };
     }
   }
 }
@@ -1059,32 +1079,32 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     const {type} = payloadJson;
 
     if (type === 'charge') {
-      db.charges.push(message);
+      newDb.charges.push(message);
     }
   }
 
   // apply chargebacks
-  const invalidatedCharges = _getConfirmedInvalidatedCharges(db, blocks, block);
+  const invalidatedCharges = _getConfirmedInvalidatedCharges(newDb, blocks, block);
   for (let i = 0; i < invalidatedCharges.length; i++) {
     const charge = invalidatedCharges[i];
-    db.charges.splice(db.charges.indexOf(charge), 1);
+    newDb.charges.splice(newDb.charges.indexOf(charge), 1);
   }
 
   // settle charges
-  const oldCharges = db.charges.slice();
+  const oldCharges = newDb.charges.slice();
   for (let i = 0; i < oldCharges.length; i++) {
     const charge = oldCharges[i];
     const chargePayload = JSON.parse(charge.payload);
     const {signature} = chargePayload;
     const chargeBlockIndex = _findChargeBlockIndex(blocks, signature);
 
-    if (chargeBlockIndex !== -1 && ((db.blocks.length + 1) - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
+    if (chargeBlockIndex !== -1 && ((newDb.blocks.length + 1) - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
 
-      let srcAddressEntry = db.balances[srcAddress];
+      let srcAddressEntry = newDb.balances[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
-        db.balances[srcAddress] = srcAddressEntry;
+        newDb.balances[srcAddress] = srcAddressEntry;
       }
       let srcAssetEntry = srcAddressEntry[asset];
       if (srcAssetEntry === undefined) {
@@ -1093,10 +1113,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       srcAssetEntry -= quantity;
       srcAddressEntry[asset] = srcAssetEntry;
 
-      let dstAddressEntry = db.balances[dstAddress];
+      let dstAddressEntry = newDb.balances[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
-        db.balances[dstAddress] = dstAddressEntry;
+        newDb.balances[dstAddress] = dstAddressEntry;
       }
       let dstAssetEntry = dstAddressEntry[asset];
       if (dstAssetEntry === undefined) {
@@ -1105,8 +1125,14 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       dstAssetEntry += quantity;
       dstAddressEntry[asset] = dstAssetEntry;
 
-      db.charges.splice(db.charges.indexOf(charge), 1);
+      newDb.charges.splice(newDb.charges.indexOf(charge), 1);
     }
+  }
+
+  // update message revocations
+  newDb.messageRevocations.push(block.messages.map(({signature}) => signature);
+  while (newDb.messageRevocations.length > MESSAGE_TTL) {
+    newDb.messageRevocations.shift();
   }
 
   // remove old messages from the mempool
@@ -1289,7 +1315,9 @@ const doHash = () => new Promise((accept, reject) => {
   const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : bigint(0).toString(16);
   const height = blocks.length + 1;
-  const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
+  const payload = JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), startHeight: height, timestamp: Date.now()});
+  const signature = null;
+  const coinbaseMessage = new Message(payload, signature);
   const allMessages = mempool.messages.concat(coinbaseMessage);
   const allMessagesJson = allMessages
     .map(message => JSON.stringify(message))
@@ -1677,9 +1705,9 @@ const _listen = () => {
     res.json({balance});
   });
 
-  const _createSend = ({asset, quantity, srcAddress, dstAddress, timestamp, privateKey}) => {
+  const _createSend = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'send', asset, quantity, srcAddress, dstAddress, timestamp});
+    const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -1704,12 +1732,13 @@ const _listen = () => {
       typeof body.quantity === 'number' &&
       typeof body.srcAddress === 'string' &&
       typeof body.dstAddress === 'string' &&
+      typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {asset, quantity, srcAddress, dstAddress, timestamp, privateKey} = body;
+      const {asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey} = body;
 
-      _createSend({asset, quantity, srcAddress, dstAddress, timestamp, privateKey})
+      _createSend({asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -1723,9 +1752,9 @@ const _listen = () => {
     }
   });
 
-  const _createMinter = ({address, asset, timestamp, privateKey}) => {
+  const _createMinter = ({address, asset, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'minter', address, asset, timestamp});
+    const payload = JSON.stringify({type: 'minter', address, asset, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -1747,12 +1776,13 @@ const _listen = () => {
       body &&
       typeof body.address === 'string' &&
       typeof body.asset === 'string' &&
+      typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {address, asset, timestamp, privateKey} = body;
+      const {address, asset, startHeight, timestamp, privateKey} = body;
 
-      _createMinter({address, asset, timestamp, privateKey})
+      _createMinter({address, asset, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -1766,9 +1796,9 @@ const _listen = () => {
     }
   });
 
-  const _createMint = ({asset, quantity, address, timestamp, privateKey}) => {
+  const _createMint = ({asset, quantity, address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'mint', asset, quantity, address, timestamp});
+    const payload = JSON.stringify({type: 'mint', asset, quantity, address, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -1791,12 +1821,13 @@ const _listen = () => {
       typeof body.asset === 'string' &&
       typeof body.quantity === 'number' &&
       typeof body.address === 'string' &&
+      typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {asset, quantity, address, timestamp, privateKey} = body;
+      const {asset, quantity, address, startHeight, timestamp, privateKey} = body;
 
-      _createMint({asset, quantity, address, timestamp, privateKey})
+      _createMint({asset, quantity, address, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -1810,8 +1841,8 @@ const _listen = () => {
     }
   });
 
-  const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
-    const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
+  const _createCharge = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp}) => {
+    const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, startHeight, timestamp});
     const message = new Message(payload, null);
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
@@ -1832,11 +1863,12 @@ const _listen = () => {
       typeof body.quantity === 'number' &&
       typeof body.srcAddress === 'string' &&
       typeof body.dstAddress === 'string' &&
+      typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number'
     ) {
-      const {asset, quantity, srcAddress, dstAddress, timestamp} = body;
+      const {asset, quantity, srcAddress, dstAddress, startHeight,  timestamp} = body;
 
-      _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+      _createCharge({asset, quantity, srcAddress, dstAddress, startHeight, timestamp})
         .then(() => {
           res.json({ok: true});
         })
@@ -1850,8 +1882,8 @@ const _listen = () => {
     }
   });
 
-  const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
-    const payload = JSON.stringify({type: 'chargeback', chargeSignature, timestamp});
+  const _createChargeback = ({chargeSignature, startHeight, timestamp, privateKey}) => {
+    const payload = JSON.stringify({type: 'chargeback', chargeSignature, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -1872,12 +1904,13 @@ const _listen = () => {
     if (
       body &&
       typeof body.chargeSignature === 'string' &&
+      typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {chargeSignature, timestamp, privateKey} = body;
+      const {chargeSignature, startHeight, timestamp, privateKey} = body;
 
-      _createChargeback({chargeSignature, timestamp, privateKey})
+      _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
