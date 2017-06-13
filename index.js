@@ -2010,10 +2010,14 @@ const _saveState = (() => {
             dbFiles = dbFiles || [];
 
             const keepDbFiles = [];
+            const zerothDbBlockIndex = Math.max(blocks.length - 10, 0);
             for (let i = 0; i < blocks.length; i++) {
-              const block = blocks[i];
-              const {height} = block;
-              keepDbFiles.push(`db-${height}.json`);
+              const dbIndex = i - zerothDbBlockIndex;
+
+              if (dbIndex >= 0) {
+                const height = i + 1;
+                keepDbFiles.push(`db-${height}.json`);
+              }
             }
 
             const promises = [];
