@@ -252,7 +252,10 @@ let db = {
     'CRD': null,
   },
 };
-let mempool = [];
+let mempool = {
+  blocks: [],
+  messages: [],
+};
 let peers = [];
 const api = new EventEmitter();
 
@@ -276,8 +279,8 @@ const _getConfirmedBalance = (db, address, asset) => {
 const _getUnconfirmedBalances = (db, mempool, address) => {
   let result = _getConfirmedBalances(db, address);
 
-  for (let i = 0; i < mempool.length; i++) {
-    const message = mempool[i];
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -340,8 +343,8 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
 const _getUnconfirmedBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
 
-  for (let i = 0; i < mempool.length; i++) {
-    const message = mempool[i];
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -376,8 +379,8 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
   let result = _getConfirmedBalances(db, address);
 
-  for (let i = 0; i < mempool.length; i++) {
-    const message = mempool[i];
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -468,8 +471,8 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
 const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
   let result = _getConfirmedBalance(db, address, asset);
 
-  for (let i = 0; i < mempool.length; i++) {
-    const message = mempool[i];
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -567,9 +570,8 @@ const _findConfirmedChargeMessage = (db, chargeSignature) => {
   return null;
 };
 const _findUnconfirmedChargeMessage = (db, mempool, chargeSignature) => {
-  const {blocks} = db;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i];
+  for (let i = db.blocks.length - 1; i >= 0; i--) {
+    const block = db.blocks[i];
     const {messages} = block;
     const message = _findLocalChargeMessage(messages, chargeSignature);
 
@@ -578,7 +580,7 @@ const _findUnconfirmedChargeMessage = (db, mempool, chargeSignature) => {
     }
   }
 
-  return _findLocalChargeMessage(messages, mempool);
+  return _findLocalChargeMessage(messages, mempool.messages);
 };
 class AddressAssetSpec {
   constructor(address, asset, balance, charges) {
@@ -703,8 +705,8 @@ const _getConfirmedInvalidatedCharges = (db, block) => {
   return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
-  const charges = db.charges.concat(mempool.filter(({type}) => type === 'charge'));
-  const chargebacks = mempool.filter(({type}) => type === 'chargeback');
+  const charges = db.charges.concat(mempool.messages.filter(({type}) => type === 'charge'));
+  const chargebacks = mempool.messages.filter(({type}) => type === 'chargeback');
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
     const chargeMessage = _findUnconfirmedChargeMessage(db, mempool, chargeSignature);
@@ -816,7 +818,7 @@ const _getConfirmedMinter = (db, asset) => db.minters[asset];
 const _getUnconfirmedMinter = (db, mempool, asset) => {
   let minter = db.minters[asset];
 
-  const mintMessages = mempool.filter(message =>
+  const mintMessages = mempool.messages.filter(message =>
     message.type === 'minter' && message.asset === asset ||
     message.type === 'send' && message.asset === (asset + ':mint')
   );
@@ -854,11 +856,9 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
   return minter;
 };
 const _commitBlock = (db, mempool, block) => {
-  const {messages: blockMessages} = block;
-
   // update balances
-  for (let i = 0; i < blockMessages.length; i++) {
-    const message = blockMessages[i];
+  for (let i = 0; i < block.messages.length; i++) {
+    const message = block.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -966,12 +966,9 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
-  // add block
-  db.blocks.push(block);
-
   // add new charges
-  for (let i = 0; i < blockMessages.length; i++) {
-    const message = blockMessages[i];
+  for (let i = 0; i < block.messages.length; i++) {
+    const message = block.messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -995,7 +992,7 @@ const _commitBlock = (db, mempool, block) => {
     const {signature} = chargePayload;
     const chargeBlockIndex = _findChargeBlockIndex(db, signature);
 
-    if (chargeBlockIndex !== -1 && (db.blocks.length - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
+    if (chargeBlockIndex !== -1 && ((db.blocks.length + 1) - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
 
       let srcAddressEntry = db.balances[srcAddress];
@@ -1026,22 +1023,35 @@ const _commitBlock = (db, mempool, block) => {
     }
   }
 
+  // add block
+  db.blocks.push(block);
+
   // emit the new block to listening peers
   api.emit('block', block);
 
-  return mempool.filter(message => !blockMessages.some(blockMessage => blockMessage.signature === message.signature));
+  // remove old messages from the mempool
+  for (let i = 0; i < block.messages.length; i++) {
+    const blockMessage = block.messages[i];
+    const mempoolMessageIndex = mempool.messages.findIndex(mempoolMessage => mempoolMessage.equals(blockMessage));
+
+    if (mempoolMessageIndex !== -1) {
+      mempool.messages.splice(mempoolMessageIndex, 1);
+    }
+  }
+
+  // XXX expire invalid messages
 };
 const _addRemoteBlock = remoteBlock => {
   console.log('add remote block', remoteBlock); // XXX finish this
 };
 const _addLocalMessage = message => {
-  mempool.push(message);
+  mempool.messages.push(message);
 
   api.emit('message', message);
 }
 const _addRemoteMessage = remoteMessage => {
-  if (!mempool.some(message => message.equals(remoteMessage))) { // XXX validate the message here
-    mempool.push(remoteMessage);
+  if (!mempool.messages.some(message => message.equals(remoteMessage))) { // XXX validate the message here
+    mempool.messages.push(remoteMessage);
 
     api.emit('message', remoteMessage);
   }
@@ -1054,7 +1064,7 @@ const doHash = () => new Promise((accept, reject) => {
   const startString = String(start);
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
   const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
-  const blockMessages = mempool.concat(coinbaseMessage);
+  const blockMessages = mempool.messages.concat(coinbaseMessage);
   const blockMessagesJson = blockMessages
     .map(message => JSON.stringify(message))
     .join('\n');
@@ -1602,7 +1612,12 @@ const _listen = () => {
           break;
         }
         case 'mempool': {
-          console.log(JSON.stringify(mempool, null, 2));
+          console.log(JSON.stringify(mempool.messages, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'forks': {
+          console.log(JSON.stringify(mempool.blocks, null, 2));
           process.stdout.write('> ');
           break;
         }
@@ -1754,7 +1769,7 @@ const _mine = () => {
         lastBlockTime = now;
         numHashes = 0;
 
-        mempool = _commitBlock(db, mempool, block);
+        _commitBlock(db, mempool, block);
 
         _save();
       }
