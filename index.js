@@ -98,10 +98,10 @@ class Block {
     return hasher.digest('hex');
   }
 
-  verify() { // XXX this needs to check against a previous block
+  verify(db, blocks, mempool = null) { // XXX this needs to check against a previous block
     const _checkHash = () => this.getHash() === this.hash;
     const _checkDifficulty = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
-    const _checkMessages = () => Promise.all(messages.map(message => message.verify({block: this})));
+    const _checkMessages = () => Promise.all(messages.map(message => message.verify(db, blocks, mempool)));
 
     const checks = [
       _checkHash,
@@ -134,7 +134,7 @@ class Message {
     return this.signature === message.signature;
   }
 
-  verify({confirmed = true} = {}) {
+  verify(db, blocks, mempool = null) {
     const {payload, signature} = this;
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
@@ -249,7 +249,7 @@ class Message {
       }
       case 'chargeback': {
         const {chargeSignature} = payloadJson;
-        const chargeMessaage = confirmed ? _findConfirmedChargeMessage(db, chargeSignature) : _findUnconfirmedChargeMessage(db, mempool, chargeSignature);
+        const chargeMessaage = confirmed ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
 
         if (chargeMessaage) {
           const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
@@ -283,7 +283,6 @@ class Message {
   }
 }
 
-let db = null;
 let dbs = [];
 let blocks = [];
 let mempool = {
@@ -293,11 +292,13 @@ let mempool = {
 let peers = [];
 const api = new EventEmitter();
 
-const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
+const _getLatestDb = () => dbs.length > 0 ? dbs[dbs.length - 1] : DEFAULT_DB;
+
+/* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
 
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
-const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4= */
 
 const _clone = o => JSON.parse(JSON.stringify(o));
 
@@ -569,9 +570,9 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _findChargeBlockIndex = (db, chargeSignature) => {
-  for (let i = db.blocks.length - 1; i >= 0; i--) {
-    const block = db.blocks[i];
+const _findChargeBlockIndex = (blocks, chargeSignature) => {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
     const {messages} = block;
     const chargeMessage = _findLocalChargeMessage(messages, chargeSignature);
 
@@ -594,7 +595,7 @@ const _findLocalChargeMessage = (messages, signature) => {
   }
   return null;
 };
-const _findConfirmedChargeMessage = (db, chargeSignature) => {
+const _findConfirmedChargeMessage = (blocks, chargeSignature) => {
   const {blocks} = db;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
@@ -608,18 +609,14 @@ const _findConfirmedChargeMessage = (db, chargeSignature) => {
 
   return null;
 };
-const _findUnconfirmedChargeMessage = (db, mempool, chargeSignature) => {
-  for (let i = db.blocks.length - 1; i >= 0; i--) {
-    const block = db.blocks[i];
-    const {messages} = block;
-    const message = _findLocalChargeMessage(messages, chargeSignature);
+const _findUnconfirmedChargeMessage = (blocks, mempool, chargeSignature) => {
+  const confirmedChargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature);
 
-    if (message) {
-      return message;
-    }
+  if (confirmedChargeMessage !== null) {
+    return confirmedChargeMessage;
+  } else {
+    return _findLocalChargeMessage(messages, mempool.messages);
   }
-
-  return _findLocalChargeMessage(messages, mempool.messages);
 };
 class AddressAssetSpec {
   constructor(address, asset, balance, charges) {
@@ -633,12 +630,12 @@ class AddressAssetSpec {
     return this.address === addressAssetSpec.address && this.asset === addressAssetSpec.asset;
   }
 }
-const _getConfirmedInvalidatedCharges = (db, block) => {
+const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
   const charges = db.charges.slice();
   const chargebacks = block.messages.filter(({type}) => type === 'chargeback');
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findConfirmedChargeMessage(db, chargeSignature);
+    const chargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -748,7 +745,7 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
   const chargebacks = mempool.messages.filter(({type}) => type === 'chargeback');
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findUnconfirmedChargeMessage(db, mempool, chargeSignature);
+    const chargeMessage = _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -932,7 +929,7 @@ const _findBlockAttachPoint = (db, mempool, block) => {
   }
 };
 
-const _commitMainChainBlock = (db, mempool, block) => {
+const _commitMainChainBlock = (db, blocks, mempool, block) => {
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
@@ -1055,7 +1052,7 @@ const _commitMainChainBlock = (db, mempool, block) => {
   }
 
   // apply chargebacks
-  const invalidatedCharges = _getConfirmedInvalidatedCharges(db, block);
+  const invalidatedCharges = _getConfirmedInvalidatedCharges(db, blocks, block);
   for (let i = 0; i < invalidatedCharges.length; i++) {
     const charge = invalidatedCharges[i];
     db.charges.splice(db.charges.indexOf(charge), 1);
@@ -1067,7 +1064,7 @@ const _commitMainChainBlock = (db, mempool, block) => {
     const charge = oldCharges[i];
     const chargePayload = JSON.parse(charge.payload);
     const {signature} = chargePayload;
-    const chargeBlockIndex = _findChargeBlockIndex(db, signature);
+    const chargeBlockIndex = _findChargeBlockIndex(blocks, signature);
 
     if (chargeBlockIndex !== -1 && ((db.blocks.length + 1) - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
@@ -1118,7 +1115,7 @@ const _commitMainChainBlock = (db, mempool, block) => {
 
   // XXX expire invalid messages
 };
-const _commitSideChainBlock = (db, mempool, block) => {
+const _commitSideChainBlock = (db, blocks, mempool, block) => {
   // add block to mempool
   if (!mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash)) {
     mempool.blocks.push(block);
@@ -1128,8 +1125,8 @@ const _commitSideChainBlock = (db, mempool, block) => {
   const _getPreviousMainChainBlock = block => {
     const {prevHash, height} = block;
 
-    if (((height - 1) >= 0) && ((height - 1) < db.blocks.length)) {
-      const candidateMainChainBlock = db.blocks[height - 1];
+    if (((height - 1) >= 0) && ((height - 1) < blocks.length)) {
+      const candidateMainChainBlock = blocks[height - 1];
 
       if (candidateMainChainBlock.hash === prevHash) {
         return candidateMainChainBlock;
@@ -1194,7 +1191,7 @@ const _commitSideChainBlock = (db, mempool, block) => {
     }
     return result;
   };
-  const mainChainDifficulty = _getBlocksDifficulty(db.blocks.slice(forkedBlockHeight - 1));
+  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlockHeight - 1));
   const sideChainDifficulty = _getBlocksDifficulty(_getSideChainBlocks(block, forkedBlock));
   if (sideChainDifficulty > mainChainDifficulty) {
     // XXX reorg
@@ -1208,24 +1205,24 @@ const _addLocalBlock = localBlock => {
 
     if (type === 'mainChain') {
       const {prevBlock} = attachPoint; // XXX verify the block first
-      _commitMainChainBlock(db, mempool, block);
+
+      _commitMainChainBlock(db, blocks, mempool, block);
     } else if (type === 'sideChain') {
       const {prevBlock} = attachPoint; // XXX verify the block first
 
-      _commitSideChainBlock(db, mempool, block);
+      _commitSideChainBlock(db, blocks, mempool, block);
     } else if (type === 'outOfRange') {
       const {direction} = attachPoint;
 
       if (direction === -1) {
         return Promise.reject({
           status: 400,
-          error: 'old block',
+          error: 'stale block',
         });
       } else {
-        // XXX resynchronize
         return Promise.reject({
           status: 400,
-          error: 'new block',
+          error: 'desynchronized block',
         });
       }
     } else {
@@ -1242,7 +1239,7 @@ const _addLocalBlock = localBlock => {
   }
 };
 const _addRemoteBlock = remoteBlock => {
-  console.log('add remote block', remoteBlock); // XXX finish this
+  console.log('add remote block', remoteBlock); // XXX attach the remote block and verify it
 };
 const _addLocalMessage = localMessage => {
   mempool.messages.push(localMessage);
@@ -1262,8 +1259,8 @@ let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
   const version = '0.0.1';
   const timestamp = Date.now();
-  const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
-  const height = db.blocks.length + 1;
+  const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : bigint(0).toString(16);
+  const height = blocks.length + 1;
   const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
   const allMessages = mempool.messages.concat(coinbaseMessage);
   const allMessagesJson = allMessages
@@ -1607,21 +1604,25 @@ const _listen = () => {
 
   app.get('/balances/:address', (req, res, next) => {
     const {address, asset} = req.params;
+    const db = _getLatestDb();
     const balance = _getConfirmedBalances(db, address);
     res.json({balance});
   });
   app.get('/balance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
+    const db = _getLatestDb();
     const balance = _getConfirmedBalance(db, address, asset);
     res.json({balance});
   });
   app.get('/unconfirmedBalances/:address', (req, res, next) => {
     const {address, asset} = req.params;
+    const db = _getLatestDb();
     const balance = _getUnconfirmedUnsettledBalances(db, address);
     res.json({balance});
   });
   app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
+    const db = _getLatestDb();
     const balance = _getUnconfirmedUnsettledBalance(db, address, asset);
     res.json({balance});
   });
@@ -1634,7 +1635,8 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const error = message.verify();
+    const db = _getLatestDb();
+    const error = message.verify(db, blocks, mempool);
     if (error === null) {
       _addLocalMessage(message);
 
@@ -1678,7 +1680,8 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const error = message.verify();
+    const db = _getLatestDb();
+    const error = message.verify(db, blocks, mempool);
     if (error === null) {
       _addLocalMessage(message);
 
@@ -1720,7 +1723,8 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const error = message.verify();
+    const db = _getLatestDb();
+    const error = message.verify(db, blocks, mempool);
     if (error === null) {
       _addLocalMessage(message);
 
@@ -1757,18 +1761,16 @@ const _listen = () => {
   });
 
   const _createCharge = ({asset, quantity, srcAddress, dstAddress, timestamp}) => {
-    if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-      const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
-      const message = new Message(payload, null);
-
+    const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, timestamp});
+    const message = new Message(payload, null);
+    const db = _getLatestDb();
+    const error = message.verify(db, blocks, mempool);
+    if (error === null) {
       _addLocalMessage(message);
 
       return Promise.resolve();
     } else {
-      return Promise.reject({
-        status: 400,
-        stack: 'insufficient funds',
-      });
+      return Promise.reject(error);
     }
   };
   app.post('/createCharge', bodyParserJson, (req, res, next) => {
@@ -1804,7 +1806,8 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const error = message.verify();
+    const db = _getLatestDb();
+    const error = message.verify(db, blocks, mempool);
     if (error === null) {
       _addLocalMessage(message);
 
@@ -1838,7 +1841,6 @@ const _listen = () => {
     }
   });
 
-  const _getBlocks = ({skip, limit}) => db.blocks.slice(skip, skip + limit);
   app.get('/blocks', (req, res, next) => {
     const {skip: skipString, limit: limitString} = req.query;
     let skip = parseInt(skipString, 10);
@@ -1850,59 +1852,22 @@ const _listen = () => {
       limit = Infinity;
     }
 
-    const blocks = _getBlocks({skip, limit});
+    const blocks = blocks.slice(skip, skip + limit);
     res.json({
       blocks,
     });
   });
   app.get('/blockcount', (req, res, next) => {
-    const blockcount = db.blocks.length;
+    const blockcount = blocks.length;
 
     res.json({
       blockcount,
     });
   });
   app.get('/db', (req, res, next) => {
-    const {skip: skipString, limit: limitString} = req.query;
-    const skip = parseInt(skipString, 10) || 0;
-    const limit = parseInt(limitString, 10) || Infinity;
+    const db = _getLatestDb();
 
-    if ((skip >= 0) && (skip >= (db.blocks.length - UNDO_HEIGHT)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
-      res.type('application/json');
-      res.write('[');
-
-      const _recurse = i => {
-        const dbIndex = skip + i;
-
-        if (i < limit && dbIndex < db.blocks.length) {
-          const _next = () => {
-            _recurse(i + 1);
-          };
-
-          if (i !== 0) {
-            res.write(',\n');
-          }
-
-          if (dbIndex === (db.blocks.length - 1)) {
-            res.write(JSON.stringify(db, null, 2));
-
-            _next();
-          } else {
-            const rs = fs.createReadStream(path.join(dataPath, `db-${dbIndex + 1}.json`));
-            rs.pipe(res, {end: false});
-            rs.on('end', () => {
-              _next();
-            });
-          }
-        } else {
-          res.end(']');
-        }
-      };
-      _recurse(0);
-    } else {
-      res.status(404);
-      res.send({error: 'skip/limit out of range'});
-    }
+    res.json(db);
   });
 
   const server = http.createServer(app)
@@ -1971,12 +1936,12 @@ const _listen = () => {
           break;
         }
         case 'blocks': {
-          console.log(JSON.stringify(db.blocks, null, 2));
+          console.log(JSON.stringify(blocks, null, 2));
           process.stdout.write('> ');
           break;
         }
         case 'blockcount': {
-          console.log(JSON.stringify(db.blocks.length, null, 2));
+          console.log(JSON.stringify(blocks.length, null, 2));
           process.stdout.write('> ');
           break;
         }
@@ -2138,7 +2103,7 @@ const _mine = () => {
         lastBlockTime = now;
         numHashes = 0;
 
-        _commitMainChainBlock(db, mempool, block);
+        _commitMainChainBlock(db, blocks, mempool, block);
 
         _save();
       }
