@@ -185,9 +185,9 @@ class Message {
       const payloadJson = JSON.parse(payload);
       const {startHeight} = payloadJson;
       const endHeight = startHeight + MESSAGE_TTL;
-      const height = blocks.length + 1;
+      const nextHeight = blocks.length + 1;
 
-      if (height >= startHeight && height < endHeight) {
+      if (nextHeight >= startHeight && nextHeight < endHeight) {
         if (!db.messageRevocations.some(signatures => signatures.includes(signature))) {
           const {type} = payloadJson;
 
@@ -224,24 +224,31 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                if (!mempool) {
-                  if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
-                    return null;
+                if (quantity > 0) {
+                  if (!mempool) {
+                    if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                      return null;
+                    } else {
+                      return {
+                        status: 400,
+                        error: 'insufficient funds',
+                      };
+                    }
                   } else {
-                    return {
-                      status: 400,
-                      error: 'insufficient funds',
-                    };
+                    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+                      return null;
+                    } else {
+                      return {
+                        status: 400,
+                        error: 'insufficient funds',
+                      };
+                    }
                   }
                 } else {
-                  if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-                    return null;
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'insufficient funds',
-                    };
-                  }
+                  return {
+                    status: 400,
+                    error: 'invalid quantity',
+                  };
                 }
               } else {
                 return {
@@ -258,14 +265,21 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+                if (quantity > 0) {
+                  const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
-                if (minter === undefined) {
-                  return null;
+                  if (minter === undefined) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'asset is already minted',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
-                    stack: 'asset is already minted',
+                    error: 'invalid quantity',
                   };
                 }
               } else {
@@ -283,14 +297,21 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+                if (quantity > 0) {
+                  const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
-                if (minter === address) {
-                  return null;
+                  if (minter === address) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'address is not minter of this asset',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
-                    stack: 'address is not minter of this asset',
+                    error: 'invalid quantity',
                   };
                 }
               } else {
@@ -303,24 +324,31 @@ class Message {
             case 'charge': {
               const {asset, quantity, srcAddress} = payloadJson;
 
-              if (!mempool) {
-                if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
-                  return Promise.resolve();
+              if (quantity > 0) {
+                if (!mempool) {
+                  if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                    return Promise.resolve();
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'insufficient funds',
+                    };
+                  }
                 } else {
-                  return {
-                    status: 400,
-                    stack: 'insufficient funds',
-                  };
+                  if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'insufficient funds',
+                    };
+                  }
                 }
               } else {
-                if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-                  return null;
-                } else {
-                  return {
-                    status: 400,
-                    stack: 'insufficient funds',
-                  };
-                }
+                return {
+                  status: 400,
+                  error: 'invalid quantity',
+                };
               }
             }
             case 'chargeback': {
@@ -2489,10 +2517,11 @@ const _listen = () => {
         }
         case 'send': {
           const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
-          const quantityNumber = parseInt(quantityString, 10);
+          const quantityNumber = parseFloat(quantityString);
+          const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, timestamp, privateKey})
+          _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
@@ -2502,11 +2531,12 @@ const _listen = () => {
             });
           break;
         }
-        case 'minter': {
+        case 'addminter': {
           const [, address, asset, privateKey] = split;
+          const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createMinter({address, asset, timestamp, privateKey})
+          _createMinter({address, asset, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
@@ -2518,10 +2548,11 @@ const _listen = () => {
         }
         case 'mint': {
           const [, asset, quantityString, address, privateKey] = split;
-          const quantityNumber = parseInt(quantityString, 10);
+          const quantityNumber = parseFloat(quantityString);
+          const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createMint({asset, quantity: quantityNumber, address, timestamp, privateKey})
+          _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
@@ -2533,10 +2564,11 @@ const _listen = () => {
         }
         case 'charge': {
           const [, asset, quantity, srcAddress, dstAddress] = split;
-          quantity = parseInt(quantity, 10);
+          const quantityNumber = parseFloat(quantity);
+          const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createCharge({asset, quantity, srcAddress, dstAddress, timestamp})
+          _createCharge({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
@@ -2548,9 +2580,10 @@ const _listen = () => {
         }
         case 'chargeback': {
           const [, chargeSignature, privateKey] = split;
+          const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createChargeback({chargeSignature, timestamp, privateKey})
+          _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
