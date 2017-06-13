@@ -1308,13 +1308,13 @@ const doHash = () => new Promise((accept, reject) => {
   }
 });
 
-const dbPath = path.join(__dirname, dataDirectory);
+const dataPath = path.join(__dirname, dataDirectory);
 const _decorateDb = db => {
   db.blocks = db.blocks.map(b => Block.from(b));
   db.charges = db.charges.map(b => Message.from(b));
 };
 const _load = () => new Promise((accept, reject) => {
-  fs.readdir(dbPath, (err, files) => {
+  fs.readdir(dataPath, (err, files) => {
     if (!err || err.code === 'ENOENT') {
       files = files || [];
 
@@ -1338,7 +1338,7 @@ const _load = () => new Promise((accept, reject) => {
       })();
 
       if (bestFile) {
-        fs.readFile(path.join(dbPath, bestFile), 'utf8', (err, s) => {
+        fs.readFile(path.join(dataPath, bestFile), 'utf8', (err, s) => {
           if (!err) {
             const j = JSON.parse(s);
             db = j;
@@ -1360,7 +1360,7 @@ const _load = () => new Promise((accept, reject) => {
   });
 });
 const _ensureDbPath = () => new Promise((accept, reject) => {
-  mkdirp(dbPath, err => {
+  mkdirp(dataPath, err => {
     if (!err) {
       accept();
     } else {
@@ -1374,7 +1374,7 @@ const _save = (() => {
 
   const _doSave = cb => {
     const _removeOldFiles = () => new Promise((accept, reject) => {
-      fs.readdir(dbPath, (err, files) => {
+      fs.readdir(dataPath, (err, files) => {
         if (!err || err.code === 'ENOENT') {
           files = files || [];
 
@@ -1397,7 +1397,7 @@ const _save = (() => {
             const file = files[i];
 
             if (!keepFiles.includes(file)) {
-              promises.push(_removeFile(path.join(dbPath, file)));
+              promises.push(_removeFile(path.join(dataPath, file)));
             }
           }
 
@@ -1410,7 +1410,7 @@ const _save = (() => {
       });
     });
     const _writeNewFile = () => new Promise((accept, reject) => {
-      writeFileAtomic(path.join(dbPath, `db-${db.blocks.length}.json`), JSON.stringify(db, null, 2), err => {
+      writeFileAtomic(path.join(dataPath, `db-${db.blocks.length}.json`), JSON.stringify(db, null, 2), err => {
         if (!err) {
           accept();
         } else {
@@ -1739,7 +1739,7 @@ const _listen = () => {
 
             _next();
           } else {
-            const rs = fs.createReadStream(path.join(dbPath, `db-${dbIndex + 1}.json`));
+            const rs = fs.createReadStream(path.join(dataPath, `db-${dbIndex + 1}.json`));
             rs.pipe(res, {end: false});
             rs.on('end', () => {
               _next();
@@ -2021,7 +2021,7 @@ const _sync = () => {
     });
   });
   const _requestSaveDb = (height, db) => new Promise((accept, reject) => {
-    writeFileAtomic(path.join(dbPath, `db-${height}.json`), JSON.stringify(db, null, 2), err => {
+    writeFileAtomic(path.join(dataPath, `db-${height}.json`), JSON.stringify(db, null, 2), err => {
       if (!err) {
         accept();
       } else {
