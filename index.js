@@ -316,83 +316,179 @@ class Peer {
 
     this._connection = null;
     this._enabled = null;
-    this._timeout = null;
-    this._error = null;
+    this._reconnectTimeout = null;
+    this._redownloadInterval = null;
   }
 
   enable() {
     this._enabled = true;
 
-    const _recurse = () => {
-      const c = new ws(this.address.replace(/^http/, 'ws') + '/listen');
-      c.on('open', () => {
-        this._error = null;
+    const _listen = () => {
+      const _recurse = () => {
+        const c = new ws(this.address.replace(/^http/, 'ws') + '/listen');
+        c.on('open', () => {
+          c.on('message', s => {
+            const m = JSON.parse(s);
+            const {type} = m;
 
-        c.on('message', s => {
-          const m = JSON.parse(s);
-          const {type} = m;
+            switch (type) {
+              case 'block': {
+                const {block} = m;
+                const error = _addBlock(dbs, blocks, mempool, block);
+                if (error) {
+                  console.warn('add remote block error:', err);
+                }
+                break;
+              }
+              case 'message': {
+                const {message} = m;
+                const db = dbs[dbs.length - 1];
+                const error = _addMessage(db, blocks, mempool, message);
+                if (error) {
+                  console.warn('add remote message error:', err);
+                }
+                break;
+              }
+              default: {
+                console.warn('unknown message type:', msg);
+                break;
+              }
+            }
+          });
+          c.on('close', () => {
+            this._connection = null;
 
-          switch (type) {
-            case 'block': {
-              const {block} = m;
+            if (this._enabled) {
+              _retry();
+            }
+          });
+        });
+        c.on('error', err => {
+          console.warn(err);
+
+          this._connection = null;
+
+          if (this._enabled) {
+            _retry();
+          }
+        });
+
+        this._connection = c;
+      };
+      const _retry = () => {
+        this._reconnectTimeout = setTimeout(() => {
+          this._reconnectTimeout = null;
+
+          _recurse();
+        }, 1000);
+      };
+    };
+    const _download = () => {
+      const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
+        const q = {};
+        if (skip !== undefined) {
+          q.skip = skip;
+        }
+        if (limit !== undefined) {
+          q.limit = limit;
+        }
+        request(this.address + '/blocks?' + querystring.stringify(q), {
+          json: true,
+        }, (err, res, body) => {
+          if (!err) {
+            const dbs = body;
+            accept(dbs);
+          } else {
+            reject(err);
+          }
+        });
+      });
+      const _requestMempool = () => new Promise((accept, reject) => {
+        request(this.address + '/mempool', {
+          json: true,
+        }, (err, res, body) => {
+          if (!err) {
+            const mempool = body;
+            accept(mempool);
+          } else {
+            reject(err);
+          }
+        });
+      });
+
+      Promise.all([
+        _requestBlocks({
+          skip: Math.max(blocks.length - 10, 0),
+        }),
+        _requestMempool(),
+      ])
+        .then(([
+          remoteBlocks,
+          remoteMempool,
+        ]) => {
+          const _addBlocks = () => {
+            for (let i = 0; i < remoteBlocks.length; i++) {
+              const block = remoteBlocks[i];
               const error = _addBlock(dbs, blocks, mempool, block);
               if (error) {
-                console.warn('add remote block error:', err);
+                console.warn(error);
               }
-              break;
             }
-            case 'message': {
-              const {message} = m;
+            return Promise.resolve();
+          };
+          const _addMempool = () => {
+            const {blocks, messages} = remoteMempool;
+
+            for (let i = 0; i < blocks.length; i++) {
+              const block = Block.from(blocks[i]);
+              const error = _addBlock(dbs, blocks, mempool, block);
+              if (error) {
+                console.warn(error);
+              }
+            }
+            for (let i = 0; i < messages.length; i++) {
+              const message = Message.from(messages[i]);
               const db = dbs[dbs.length - 1];
               const error = _addMessage(db, blocks, mempool, message);
               if (error) {
-                console.warn('add remote message error:', err);
+                console.warn(error);
               }
-              break;
             }
-            default: {
-              console.warn('unknown message type:', msg);
-              break;
-            }
-          }
+            return Promise.resolve();
+          };
+
+          return Promise.all([
+            _addBlocks(),
+            _addMempool(),
+          ]);
+        })
+        .catch(err => {
+          console.warn(err);
         });
-        c.on('close', () => {
-          this._connection = null;
-          this._error = 'CLOSED';
 
-          if (this._enabled) {
-            retry();
-          }
-        });
-      });
-      c.on('error', err => {
-        this._connection = null;
-        this._error = err.code;
+      this._redownloadInterval = setInterval(() => {
+        this._redownloadInterval = null;
 
-        if (this._enabled) {
-          retry();
-        }
-      });
-
-      this._connection = c;
-      this._error = 'CONNECTING';
+        _download();
+      }, 30 * 1000);
     };
-    const _retry = () => {
-      this._timeout = setTimeout(() => {
-        this._timeout = null;
 
-        _recurse();
-      }, 1000);
-    };
+    _listen();
+    _download();
   }
 
   disable() {
     this._enabled = false;
 
-    if (this._timeout) {
-      clearTimeout(this._timeout);
+    if (this._reconnectTimeout) {
+      clearTimeout(this._reconnectTimeout);
 
-      this._timeout = null;
+      this._reconnectTimeout = null;
+    }
+    if (this._redownloadInterval) {
+      clearInterval(this._redownloadInterval);
+
+      this._redownloadInterval = null;
     }
   }
 }
@@ -2366,155 +2462,6 @@ const _startMine = () => {
 const _stopMine = () => {
   clearImmediate(mineImmediate);
   mineImmediate = null;
-};
-
-const _sync = () => {
-  const peer = peers[Math.floor(Math.random() * peers.length)];
-
-  const _requestSaveDb = (height, db) => new Promise((accept, reject) => {
-    writeFileAtomic(path.join(dataPath, `db-${height}.json`), JSON.stringify(db, null, 2), err => {
-      if (!err) {
-        accept();
-      } else {
-        reject(err);
-      }
-    });
-  });
-  const _requestSaveDbs = (height, dbs) => {
-    const promises = [];
-    for (let i = 0; i < dbs.length; i++) {
-      const db = dbs[i];
-      promises.push(_requestSaveDb(height + i, db));
-    }
-    return Promise.all(promises);
-  };
-  const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
-    const q = {};
-    if (skip !== undefined) {
-      q.skip = skip;
-    }
-    if (limit !== undefined) {
-      q.limit = limit;
-    }
-    request(peer + '/blocks?' + querystring.stringify(q), {
-      json: true,
-    }, (err, res, body) => {
-      if (!err) {
-        const dbs = body;
-        accept(dbs);
-      } else {
-        reject(err);
-      }
-    });
-  });
-  const _requestMempool = () => new Promise((accept, reject) => {
-    request(peer + '/mempool', {
-      json: true,
-    }, (err, res, body) => {
-      if (!err) {
-        const mempool = body;
-        accept(mempool);
-      } else {
-        reject(err);
-      }
-    });
-  });
-  const _connect = () => {
-    const c = new ws(peer.replace(/^http/, 'ws') + '/listen');
-    c.on('open', () => {
-      console.log('peer connection open', peer);
-
-      c.on('message', s => {
-        const m = JSON.parse(s);
-        const {type} = m;
-
-        switch (type) {
-          case 'block': {
-            const {block} = m;
-            const error = _addBlock(dbs, blocks, mempool, block);
-            if (error) {
-              console.warn('add remote block error:', err);
-            }
-            break;
-          }
-          case 'message': {
-            const {message} = m;
-            const db = dbs[dbs.length - 1];
-            const error = _addMessage(db, blocks, mempool, message);
-            if (error) {
-              console.warn('add remote message error:', err);
-            }
-            break;
-          }
-          default: {
-            console.warn('unknown message type:', msg);
-            break;
-          }
-        }
-      });
-      c.on('close', () => {
-        console.log('peer connection closed', peer);
-      });
-    });
-    c.on('error', err => {
-      console.warn(err);
-    });
-  };
-
-  Promise.all([
-    _requestBlocks({
-      skip: Math.max(blocks.length - 10, 0),
-    }),
-    _requestMempool(),
-  ])
-    .then(([
-      remoteBlocks,
-      remoteMempool,
-    ]) => {
-      const _addBlocks = () => {
-        for (let i = 0; i < remoteBlocks.length; i++) {
-          const block = remoteBlocks[i];
-          const error = _addBlock(dbs, blocks, mempool, block);
-          if (error) {
-            console.warn(error);
-          }
-        }
-        return Promise.resolve();
-      };
-      const _addMempool = () => {
-        const {blocks, messages} = remoteMempool;
-
-        for (let i = 0; i < blocks.length; i++) {
-          const block = Block.from(blocks[i]);
-          const error = _addBlock(dbs, blocks, mempool, block);
-          if (error) {
-            console.warn(error);
-          }
-        }
-        for (let i = 0; i < messages.length; i++) {
-          const message = Message.from(messages[i]);
-          const db = dbs[dbs.length - 1];
-          const error = _addMessage(db, blocks, mempool, message);
-          if (error) {
-            console.warn(error);
-          }
-        }
-        return Promise.resolve();
-      };
-
-      Promise.all([
-        _addBlocks(),
-        _addMempool(),
-      ])
-        .then(() => {
-          _connect();
-
-          console.log('synced'); // XXX
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    });
 };
 
 _load()
