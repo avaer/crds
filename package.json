@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/modulesio/hasher.git"
+    "url": "git+https://github.com/modulesio/crd.git"
   },
   "author": "Avaer Kazmer <a@modules.io>",
   "license": "ISC",
