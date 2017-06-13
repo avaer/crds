@@ -2171,7 +2171,7 @@ const _listen = () => {
       }
     },
   });
-  replHistory(r, path.join(__dirname, 'history.txt'));
+  replHistory(r, path.join(dataPath, 'history.txt'));
   r.on('exit', () => {
     console.log();
     process.exit(0);
