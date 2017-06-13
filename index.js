@@ -1109,10 +1109,10 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
   return minter;
 };
 const _checkBlockExists = (blocks, mempool, block) => {
-  const {height} = block;
-  const comittedBlock = blocks[height - 1];
+  const blockIndex = block.height - 1;
+  const mainChainBlock = (blockIndex < blocks.length) ? blocks[blockIndex] : null;
 
-  if (comittedBlock.hash === block.hash) {
+  if (mainChainBlock && mainChainBlock.hash === block.hash) {
     return true;
   } else {
     return mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash && mempoolBlock.height === block.height);
@@ -1637,7 +1637,7 @@ const doHash = () => new Promise((accept, reject) => {
     const hash = hasher.digest('hex');
 
     if (_checkHashMeetsTarget(hash, target)) {
-      const block = new Block(hash, prevHash, height, difficulty, version, timestamp, blockMessages, nonce);
+      const block = new Block(hash, prevHash, height, difficulty, version, timestamp, allMessages, nonce);
       accept(block);
 
       return;
@@ -2568,7 +2568,10 @@ const _mine = () => {
         lastBlockTime = now;
         numHashes = 0;
 
-        _commitMainChainBlock(db, blocks, mempool, block);
+        const error = _addBlock(dbs, blocks, mempool, block);
+        if (error) {
+          console.warn('add mined block error:', error);
+        }
 
         _saveState();
       }
