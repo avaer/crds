@@ -1218,7 +1218,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     newMempool,
   };
 };
-const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => { // XXX handle null forkedBlock
+const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
   const _getBlocksDifficulty = blocks => {
     let result = 0;
     for (let i = 0; i < blocks.length; i++) {
@@ -1228,8 +1228,9 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     }
     return result;
   };
-  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlock.height - 1));
-  const sideChainDifficulty = _getBlocksDifficulty(sideChainBlocks.slice(forkedBlock.height - 1));
+  const forkedBlockHeight = forkedBlock ? forkedBlock.height : 0;
+  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlockHeight));
+  const sideChainDifficulty = _getBlocksDifficulty(sideChainBlocks.slice(forkedBlockHeight));
   const needsReorg = sideChainDifficulty > mainChainDifficulty;
 
   const _getBlocksMessages = blocks => {
@@ -1245,11 +1246,11 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     }
     return result;
   };
-  const forkedBlockIndex = forkedBlock.height - 1;
-  const numSlicedBlocks = blocks.length - forkedBlockIndex - 1;
+  const forkedBlockIndex = forkedBlockHeight - 1;
+  const numSlicedBlocks = blocks.length - (forkedBlockIndex + 1);
   const slicedBlocks = blocks.slice(-numSlicedBlocks);
   const slicedMessages = _getBlocksMessages(slicedBlocks);
-  const numAddedSideChainBlocks = sidechainBlocks.length - forkedBlockIndex - 1;
+  const numAddedSideChainBlocks = sidechainBlocks.length - (forkedBlockIndex + 1);
   const addedSideChainBlocks = sideChainBlocks.slice(-numAddedSideChainBlocks);
   const addedSideChainMessages = _getBlocksMessages(addedSideChainBlocks);
 
