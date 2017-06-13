@@ -320,8 +320,6 @@ let mempool = {
 let peers = [];
 const api = new EventEmitter();
 
-const _getLatestDb = () => dbs.length > 0 ? dbs[dbs.length - 1] : DEFAULT_DB;
-
 /* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
 
@@ -1779,25 +1777,25 @@ const _listen = () => {
 
   app.get('/balances/:address', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const balance = _getConfirmedBalances(db, address);
     res.json({balance});
   });
   app.get('/balance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const balance = _getConfirmedBalance(db, address, asset);
     res.json({balance});
   });
   app.get('/unconfirmedBalances/:address', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const balance = _getUnconfirmedUnsettledBalances(db, address);
     res.json({balance});
   });
   app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const balance = _getUnconfirmedUnsettledBalance(db, address, asset);
     res.json({balance});
   });
@@ -1810,7 +1808,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -1854,7 +1852,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -1896,7 +1894,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -1935,7 +1933,7 @@ const _listen = () => {
   const _createCharge = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp}) => {
     const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, startHeight, timestamp});
     const message = new Message(payload, null);
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -1977,7 +1975,7 @@ const _listen = () => {
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
-    const db = _getLatestDb();
+    const db = dbs[dbs.length - 1];
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
       return Promise.resolve();
@@ -2355,7 +2353,7 @@ const _sync = () => {
           }
           case 'message': {
             const {message} = m;
-            const db = _getLatestDb();
+            const db = dbs[dbs.length - 1];
             const error = _addMessage(db, blocks, mempool, message);
             if (error) {
               console.warn('add remote message error:', err);
@@ -2409,7 +2407,7 @@ const _sync = () => {
         }
         for (let i = 0; i < messages.length; i++) {
           const message = Message.from(messages[i]);
-          const db = _getLatestDb();
+          const db = dbs[dbs.length - 1];
           const error = _addMessage(db, blocks, mempool, message);
           if (error) {
             console.warn(error);
