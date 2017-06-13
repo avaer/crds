@@ -310,6 +310,92 @@ class Message {
     }
   }
 }
+class Peer {
+  constructor(address) {
+    this.address = address;
+
+    this._connection = null;
+    this._enabled = null;
+    this._timeout = null;
+    this._error = null;
+  }
+
+  enable() {
+    this._enabled = true;
+
+    const _recurse = () => {
+      const c = new ws(this.address.replace(/^http/, 'ws') + '/listen');
+      c.on('open', () => {
+        this._error = null;
+
+        c.on('message', s => {
+          const m = JSON.parse(s);
+          const {type} = m;
+
+          switch (type) {
+            case 'block': {
+              const {block} = m;
+              const error = _addBlock(dbs, blocks, mempool, block);
+              if (error) {
+                console.warn('add remote block error:', err);
+              }
+              break;
+            }
+            case 'message': {
+              const {message} = m;
+              const db = dbs[dbs.length - 1];
+              const error = _addMessage(db, blocks, mempool, message);
+              if (error) {
+                console.warn('add remote message error:', err);
+              }
+              break;
+            }
+            default: {
+              console.warn('unknown message type:', msg);
+              break;
+            }
+          }
+        });
+        c.on('close', () => {
+          this._connection = null;
+          this._error = 'CLOSED';
+
+          if (this._enabled) {
+            retry();
+          }
+        });
+      });
+      c.on('error', err => {
+        this._connection = null;
+        this._error = err.code;
+
+        if (this._enabled) {
+          retry();
+        }
+      });
+
+      this._connection = c;
+      this._error = 'CONNECTING';
+    };
+    const _retry = () => {
+      this._timeout = setTimeout(() => {
+        this._timeout = null;
+
+        _recurse();
+      }, 1000);
+    };
+  }
+
+  disable() {
+    this._enabled = false;
+
+    if (this._timeout) {
+      clearTimeout(this._timeout);
+
+      this._timeout = null;
+    }
+  }
+}
 
 let dbs = [];
 let blocks = [];
