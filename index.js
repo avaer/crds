@@ -50,7 +50,7 @@ const dataDirectory = _findArg('dataDirectory') || 'db';
 class Block {
   constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
     this.hash = hash;
-    this.f = prevHash;
+    this.prevHash = prevHash;
     this.height = height;
     this.difficulty = difficulty;
     this.version = version;
@@ -69,7 +69,7 @@ class Block {
   }
 
   getHash() {
-    const {prevHash, height, difficulty, version, timestamp, messages} = this;
+    const {prevHash, height, difficulty, version, timestamp, messages, nonce} = this;
     const messagesJson = messages
       .map(message => JSON.stringify(message))
       .join('\n');
@@ -1122,10 +1122,10 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
   const blockIndex = height - 1;
 
-  if ((blockIndex >= Math.max(blocks.length - UNDO_HEIGHT, 0)) && (blockIndex < blocks.length)) {
+  if ((blockIndex >= Math.max(blocks.length - UNDO_HEIGHT, 0)) && (blockIndex <= blocks.length)) {
     const candidateTopMainChainBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
 
-    if (candidateTopMainChainBlockHash === prevHash) {
+    if (blockIndex === blocks.length && candidateTopMainChainBlockHash === prevHash) {
       return { // valid on main chain
         type: 'mainChain',
       };
