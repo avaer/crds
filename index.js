@@ -19,6 +19,7 @@ const bigint = require('big-integer');
 const eccrypto = require('eccrypto-sync');
 
 const WORK_TIME = 20;
+const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
 const DEFAULT_DB = {
   balances: {},
@@ -896,7 +897,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 const _findBlockAttachPoint = (db, mempool, block) => {
   const {prevHash, height} = block;
 
-  if (((height - 1) >= (db.blocks.length - 10)) && ((height - 1) < db.blocks.length)) {
+  if (((height - 1) >= (db.blocks.length - UNDO_HEIGHT)) && ((height - 1) < db.blocks.length)) {
     const candidateMainChainBlock = db.blocks[height - 1];
 
     if (candidateMainChainBlock.hash === prevHash && candidateMainChainBlock.height === (height - 1)) {
@@ -917,7 +918,7 @@ const _findBlockAttachPoint = (db, mempool, block) => {
       }
     }
   } else {
-    if ((height - 1) < (db.blocks.length - 10)) {
+    if ((height - 1) < (db.blocks.length - UNDO_HEIGHT)) {
       return {
         type: 'outOfRange',
         direction: -1,
@@ -1385,7 +1386,7 @@ const _load = () => {
           const match = file.match(/^db-([0-9]+)\.json$/);
           return Boolean(match) && parseInt(match[1], 10) === height;
         });
-        for (let i = bestBlockHeight; (i >= (bestBlockHeight - 10)) && (i > 0) && _haveDbFile(i); i--) {
+        for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
           result.push(i);
         }
         return result;
@@ -1459,7 +1460,7 @@ const _save = (() => {
           files = files || [];
 
           const keepFiles = [];
-          for (let i = db.blocks.length - 1; i >= db.blocks.length - 10; i--) {
+          for (let i = db.blocks.length - 1; i >= db.blocks.length - UNDO_HEIGHT; i--) {
             keepFiles.push(`db-${i}.json`);
           }
 
@@ -1798,7 +1799,7 @@ const _listen = () => {
     const skip = parseInt(skipString, 10) || 0;
     const limit = parseInt(limitString, 10) || Infinity;
 
-    if ((skip >= 0) && (skip >= (db.blocks.length - 10)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
+    if ((skip >= 0) && (skip >= (db.blocks.length - UNDO_HEIGHT)) && ((skip + limit) <= db.blocks.length)) { // XXX hold a write lock here
       res.type('application/json');
       res.write('[');
 
@@ -2181,8 +2182,8 @@ const _sync = () => {
 
   _requestBlockCount()
     .then(blockcount => {
-      const skip = Math.max(blockcount - 10, 0);
-      const limit = 10;
+      const skip = Math.max(blockcount - UNDO_HEIGHT, 0);
+      const limit = UNDO_HEIGHT;
 
       Promise.all([
         _requestDbs({skip, limit}),
