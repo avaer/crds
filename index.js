@@ -2464,6 +2464,7 @@ const _listen = () => {
 
       switch (command) {
         case 'db': {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
           console.log(JSON.stringify(db, null, 2));
           process.stdout.write('> ');
           break;
@@ -2488,20 +2489,25 @@ const _listen = () => {
           process.stdout.write('> ');
           break;
         }
-        case 'balances': {
-          const [, address] = split;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balances = _getConfirmedBalances(db, address);
-          console.log(JSON.stringify(balances, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'balances': {
+        case 'balance': {
           const [, address, asset] = split;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balance = _getConfirmedBalance(db, address, asset);
-          console.log(JSON.stringify(balance, null, 2));
-          process.stdout.write('> ');
+
+          if (address && asset) {
+            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+            const balance = _getConfirmedBalance(db, address, asset);
+            console.log(JSON.stringify(balance, null, 2));
+            process.stdout.write('> ')
+          } else if (address) {
+            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+            const balances = _getConfirmedBalances(db, address);
+            console.log(JSON.stringify(balances, null, 2));
+            process.stdout.write('> ');
+          } else {
+            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+            console.log(JSON.stringify(db.balances, null, 2));
+            process.stdout.write('> ');
+          }
+
           break;
         }
         case 'minter': {
