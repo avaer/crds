@@ -1738,7 +1738,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
 const _addMessage = (db, blocks, mempool, message) => {
   const error = message.verify(db, blocks, mempool);
   if (!error) {
-    if (!mempool.messages.some(message => message.equals(message))) {
+    if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
       mempool.messages.push(message);
     }
 
