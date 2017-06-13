@@ -1233,7 +1233,38 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
   const newBlocks = needsReorg ? sideChainBlocks.slice() : blocks.slice();
   const newMempool = (() => {
     if (needsReorg) {
-      // XXX
+      const _getDbsMessages = dbs => {
+        const result = [];
+        for (let i = 0; i < dbs.length; i++) {
+          const db = dbs[i];
+          const {messages} = db;
+
+          for (let j = 0; j < messages; j++) {
+            const message = messages[j];
+            result.push(message);
+          }
+        }
+        return result;
+      };
+
+      const forkedBlockIndex = forkedBlock.height - 1;
+      const numSlicedBlocks = blocks.length - forkedBlockIndex;
+      const slicedBlocks = dbs.slice(-numSlicedBlocks);
+      const slicedDbs = dbs.slice(-numSlicedBlocks);
+      const slicedMessages = _getDbsMessages(slicedDbs);
+      const numAddedSideChainBlocks = sidechainBlocks.length - forkedBlockIndex;
+      const addedSideChainBlocks = sideChainBlocks.slice(-numAddedSideChainBlocks);
+      const addedSideChainDbs = newDbs.slice(-numAddedSideChainBlocks);
+      const addedSideChainMessages = _getDbsMessages(addedSideChainDbs);
+
+      return {
+        blocks: mempool.blocks
+          .concat(slicedBlocks)
+          .filter(mempoolBlock => !addedSideChainBlocks.some(addedSideChainBlock => addedSideChainBlock.hash === mempoolBlock.hash)),
+        messages: mempool.messages
+          .concat(slicedMessages)
+          .filter(mempoolMessage => !addedSideChainMessages.some(addedSideChainMessage => addedSideChainMessage.signature === mempoolMessage.signature)),
+      };
     } else {
       return {
         blocks: mempool.blocks.concat(block),
@@ -1281,7 +1312,7 @@ const _addBlock = block => {
           const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(db, blocks, mempool, block, forkedBlock, sideChainBlocks);
           dbs = newDbs;
           blocks = newBlocks;
-          mempool = newMempool();
+          mempool = newMempool;
 
           _save();
 
