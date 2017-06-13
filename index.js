@@ -311,8 +311,8 @@ class Message {
   }
 }
 class Peer {
-  constructor(address) {
-    this.address = address;
+  constructor(url) {
+    this.url = url;
 
     this._connection = null;
     this._enabled = null;
@@ -320,12 +320,16 @@ class Peer {
     this._redownloadInterval = null;
   }
 
+  equals(peer) {
+    return this.url === peer.url;
+  }
+
   enable() {
     this._enabled = true;
 
     const _listen = () => {
       const _recurse = () => {
-        const c = new ws(this.address.replace(/^http/, 'ws') + '/listen');
+        const c = new ws(this.url.replace(/^http/, 'ws') + '/listen');
         c.on('open', () => {
           c.on('message', s => {
             const m = JSON.parse(s);
@@ -392,7 +396,7 @@ class Peer {
         if (limit !== undefined) {
           q.limit = limit;
         }
-        request(this.address + '/blocks?' + querystring.stringify(q), {
+        request(this.url + '/blocks?' + querystring.stringify(q), {
           json: true,
         }, (err, res, body) => {
           if (!err) {
@@ -404,7 +408,7 @@ class Peer {
         });
       });
       const _requestMempool = () => new Promise((accept, reject) => {
-        request(this.address + '/mempool', {
+        request(this.url + '/mempool', {
           json: true,
         }, (err, res, body) => {
           if (!err) {
@@ -2415,11 +2419,28 @@ const _listen = () => {
           }
           break;
         }
-        case 'connect': {
-          const [, url] = split;
-          peers.push(url);
+        case 'peers': {
+          console.log(peers.map(({url}) => url).join('\n'));
+          process.stdout.write('> ');
 
-          _sync();
+          break;
+        }
+        case 'addpeer': {
+          const [, url] = split;
+          const peer = new Peer(url);
+          if (!peers.some(p => p.equals(peer))) {
+            peers.push(peer);
+          }
+
+          // XXX save these
+          // XXX add dynamic enable/disable for these
+
+          break;
+        }
+        case 'removepeer': {
+          const [, url] = split;
+          peers = peers.filter(peer => peer.url === url);
+
           break;
         }
         default: {
