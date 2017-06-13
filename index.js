@@ -1988,13 +1988,17 @@ const _saveState = (() => {
           }
         });
       });
+      const zerothDbBlockIndex = Math.max(blocks.length - 10, 0);
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
         promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
 
-        const db = dbs[i];
-        promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
+        const dbIndex = i - zerothDbBlockIndex;
+        if (dbIndex >= 0) {
+          const db = dbs[dbIndex];
+          promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
+        }
       }
 
       return Promise.all(promises);
