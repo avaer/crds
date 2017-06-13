@@ -1891,7 +1891,7 @@ const _ensureDataPaths = () => {
 };
 const _saveState = (() => {
   const _doSave = cb => {
-    const _writeNewFiles = () => new Promise((accept, reject) => {
+    const _writeNewFiles = () => {
       const promises = [];
       const _writeFile = (p, d) => new Promise((accept, reject) => {
         writeFileAtomic(p, d, err => {
@@ -1912,8 +1912,8 @@ const _saveState = (() => {
       }
 
       return Promise.all(promises);
-    });
-    const _removeOldFiles = () => new Promise((accept, reject) => {
+    };
+    const _removeOldFiles = () => {
       const _removeDbFiles = () => new Promise((accept, reject) => {
         fs.readdir(dbDataPath, (err, dbFiles) => {
           if (!err || err.code === 'ENOENT') {
@@ -1952,7 +1952,7 @@ const _saveState = (() => {
           }
         });
       });
-      const _removeBlockFiles = new Promise((accept, reject) => {
+      const _removeBlockFiles = () => new Promise((accept, reject) => {
         fs.readdir(blocksDataPath, (err, blockFiles) => {
           if (!err || err.code === 'ENOENT') {
             blockFiles = blockFiles || [];
@@ -2003,7 +2003,7 @@ const _saveState = (() => {
         _removeDbFiles(),
         _removeBlockFiles(),
       ]);
-    });
+    };
 
     _writeNewFiles()
       .then(() => _removeOldFiles())
@@ -2644,8 +2644,6 @@ const _mine = () => {
         if (error) {
           console.warn('add mined block error:', error);
         }
-
-        _saveState();
       }
 
       mineImmediate = setImmediate(_mine);
