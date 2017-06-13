@@ -639,7 +639,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
     if (type === 'coinbase') {
       const {asset, quantity, address} = payloadJson;
 
-      let addressEntry = db.balances[address];
+      let addressEntry = result[address];
       if (addressEntry === undefined){
         addressEntry = {};
         result[address] = addressEntry;
@@ -652,7 +652,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
-      let srcAddressEntry = db.balances[srcAddress];
+      let srcAddressEntry = result[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
         result[srcAddress] = srcAddressEntry;
@@ -663,7 +663,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       }
       srcAddressEntry[asset] = srcAssetEntry - quantity;
 
-      let dstAddressEntry = db.balances[dstAddress];
+      let dstAddressEntry = result[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
         result[dstAddress] = dstAddressEntry;
@@ -677,7 +677,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const {address, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
-      let addressEntry = db.balances[address];
+      let addressEntry = result[address];
       if (addressEntry === undefined){
         addressEntry = {};
         result[address] = addressEntry;
