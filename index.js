@@ -21,9 +21,6 @@ const eccrypto = require('eccrypto-sync');
 const WORK_TIME = 20;
 const CHARGE_SETTLE_BLOCKS = 100;
 const DEFAULT_DB = {
-  version: '0.0.1',
-  hash: '', // XXX ensure this is saved
-  height: 1,
   balances: {},
   charges: [],
   minters: {
@@ -46,19 +43,20 @@ const port = parseInt(_findArg('port')) || 9999;
 const dataDirectory = _findArg('dataDirectory') || 'db';
 
 class Block {
-  constructor(hash, prevHash, height, difficulty, timestamp, messages, nonce) {
+  constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
     this.hash = hash;
-    this.prevHash = prevHash;
+    this.f = prevHash;
     this.height = height;
     this.difficulty = difficulty;
+    this.version = version;
     this.timestamp = timestamp;
     this.messages = messages;
     this.nonce = nonce;
   }
 
   static from(o) {
-    const {hash, prevHash, timestamp, messages, nonce} = o;
-    return new Block(hash, prevHash, height, difficulty, timestamp, messages.map(message => Message.from(message)), nonce);
+    const {hash, prevHash, height, difficulty, version, timestamp, messages, nonce} = o;
+    return new Block(hash, prevHash, height, difficulty, version, timestamp, messages.map(message => Message.from(message)), nonce);
   }
 
   equals(block) {
@@ -66,7 +64,7 @@ class Block {
   }
 
   getHash() {
-    const {prevHash, height, difficulty, timestamp, messages} = this;
+    const {prevHash, height, difficulty, version, timestamp, messages} = this;
     const messagesJson = messages
       .map(message => JSON.stringify(message))
       .join('\n');
@@ -81,6 +79,8 @@ class Block {
       hasher.update(':');
       uint64Array[0] = difficulty;
       hasher.update(uint64Array);
+      hasher.update(':');
+      hasher.update(version);
       hasher.update(':');
       uint64Array[0] = timestamp;
       hasher.update(uint64Array);
@@ -1259,6 +1259,7 @@ const _addRemoteMessage = remoteMessage => {
 let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
+  const version = '0.0.1';
   const timestamp = Date.now();
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
   const height = db.blocks.length + 1;
@@ -1279,6 +1280,8 @@ const doHash = () => new Promise((accept, reject) => {
     uint64Array[0] = difficulty;
     hasher.update(uint64Array);
     hasher.update(':');
+    hasher.update(version);
+    hasher.update(':');
     uint64Array[0] = timestamp;
     hasher.update(uint64Array);
     hasher.update(':');
@@ -1295,7 +1298,7 @@ const doHash = () => new Promise((accept, reject) => {
     const hash = hasher.digest('hex');
 
     if (_checkHashMeetsTarget(hash, target)) {
-      const block = new Block(hash, prevHash, height, difficulty, timestamp, blockMessages, nonce);
+      const block = new Block(hash, prevHash, height, difficulty, version, timestamp, blockMessages, nonce);
       accept(block);
 
       return;
