@@ -20,6 +20,16 @@ const eccrypto = require('eccrypto-sync');
 
 const WORK_TIME = 20;
 const CHARGE_SETTLE_BLOCKS = 100;
+const DEFAULT_DB = {
+  version: '0.0.1',
+  hash: '', // XXX ensure this is saved
+  height: 1,
+  balances: {},
+  charges: [],
+  minters: {
+    'CRD': null,
+  },
+};
 
 const args = process.argv.slice(2);
 const _findArg = name => {
@@ -272,15 +282,9 @@ class Message {
   }
 }
 
-let db = {
-  version: '0.0.1',
-  blocks: [],
-  balances: {},
-  charges: [],
-  minters: {
-    'CRD': null,
-  },
-};
+let db = null;
+let dbs = [];
+let blocks = [];
 let mempool = {
   blocks: [],
   messages: [],
@@ -293,6 +297,8 @@ const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqe
 
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
 const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+
+const _clone = o => JSON.parse(JSON.stringify(o));
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
@@ -1309,54 +1315,125 @@ const doHash = () => new Promise((accept, reject) => {
 });
 
 const dataPath = path.join(__dirname, dataDirectory);
+const dbDataPath = path.join(dataPath, 'db');
+const blocksDataPath = path.join(dataPath, 'blocks');
 const _decorateDb = db => {
-  db.blocks = db.blocks.map(b => Block.from(b));
   db.charges = db.charges.map(b => Message.from(b));
 };
-const _load = () => new Promise((accept, reject) => {
-  fs.readdir(dataPath, (err, files) => {
-    if (!err || err.code === 'ENOENT') {
-      files = files || [];
+const _decorateDbs = dbs => {
+  for (let i = 0; i < dbs.length; i++) {
+    const db = dbs[i];
+    _decorateDb(db);
+  }
+};
+const _decorateBlocks = blocks => {
+  for (let i = 0; i < blocks.length; i++) {
+    blocks[i] = Block.from(blocks[i]);
+  }
+};
+const _load = () => {
+  const _readdirDbs = () => new Promise((accept, reject) => {
+    fs.readdir(dbDataPath, (err, files) => {
+      if (!err || err.code === 'ENOENT') {
+        files = files || [];
 
-      const bestFile = (() => {
-        let result = null;
-        let resultHeight = -Infinity;
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const match = file.match(/^db-([0-9]+)\.json$/);
+        accept(files);
+      } else {
+        reject(err);
+      }
+    });
+  });
+  const _readdirBlocks = () => new Promise((accept, reject) => {
+    fs.readdir(blocksDataPath, (err, files) => {
+      if (!err || err.code === 'ENOENT') {
+        files = files || [];
 
-          if (match) {
-            const numBlocks = parseInt(match[1], 10);
+        accept(files);
+      } else {
+        reject(err);
+      }
+    });
+  });
 
-            if (numBlocks > resultHeight) {
-              result = file;
-              resultHeight = numBlocks;
-            }
+  return Promise.resolve([
+    _readdirDbs(),
+    _readdirBlocks(),
+  ])
+    .then(([
+      dbFiles,
+      blockFiles,
+    ]) => {
+      const bestBlockHeight = (() => {
+        for (let height = 1; height < blockFiles.length; height++) {
+          const foundBlockAtThisHeight = blockFiles.some(file => {
+            const match = file.match(/^block-([0-9]+)\.json$/);
+            return Boolean(match) && parseInt(match[1], 10) === height;
+          });
+
+          if (!foundBlockAtThisHeight) {
+            return height - 1;
           }
+        }
+      })();
+      const candidateHeights = (() => {
+        const result = [];
+
+        const _haveDbFile = height => dbFiles.some(file => {
+          const match = file.match(/^db-([0-9]+)\.json$/);
+          return Boolean(match) && parseInt(match[1], 10) === height;
+        });
+        for (let i = bestBlockHeight; (i >= (bestBlockHeight - 10)) && (i > 0) && _haveDbFile(i); i--) {
+          result.push(i);
         }
         return result;
       })();
 
-      if (bestFile) {
-        fs.readFile(path.join(dataPath, bestFile), 'utf8', (err, s) => {
-          if (!err) {
-            const j = JSON.parse(s);
-            db = j;
+      if (candidateHeights.length > 0) { // load dbs and blocks from disk
+        const _readDbFiles = candidateHeights.map(height => _readDbFile(height));
+        const _readDbFile = height => new Promise((accept, reject) => {
+          fs.readFile(path.join(dbDataPath, `db-${height}.json`), 'utf8', (err, s) => {
+            if (!err) {
+              const db = JSON.parse(s);
+              _decorateDb(db);
+
+              accept(db);
+            } else {
+              reject(err);
+            }
+          });
+        });
+
+        return Promise.all([
+          _readDbFiles(),
+          _readBlockFiles(),
+        ])
+          .then(([
+            newDbs,
+            newBlocks,
+          ]) => {
+            // NOTE: we are assuming no file corruption
+            db = _clone(newDbs[newDbs.length - 1]);
             _decorateDb(db);
 
-            accept();
-          } else if (err.code === 'ENOENT') {
-            accept();
-          } else {
-            reject(err);
-          }
-        });
-      } else {
-        accept();
+            dbs = newDbs;
+            _decorateDbs(db);
+
+            blocks = newBlocks;
+            _decorateBlocks(blocks);
+          });
+      } else { // nothing to salvage; bootstrap db and do a full sync
+        db = _clone(DEFAULT_DB);
+        _decorateDb(db);
+
+        dbs = [];
+        _decorateDbs(dbs);
+
+        blocks = [];
+        _decorateBlocks(blocks);
+
+        return Promise.resolve();
       }
-    } else {
-      reject(err);
-    }
+    });
   });
 });
 const _ensureDbPath = () => new Promise((accept, reject) => {
