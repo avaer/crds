@@ -1454,55 +1454,123 @@ const _save = (() => {
   let queued = false;
 
   const _doSave = cb => {
-    const _removeOldFiles = () => new Promise((accept, reject) => {
-      fs.readdir(dataPath, (err, files) => {
-        if (!err || err.code === 'ENOENT') {
-          files = files || [];
-
-          const keepFiles = [];
-          for (let i = db.blocks.length - 1; i >= db.blocks.length - UNDO_HEIGHT; i--) {
-            keepFiles.push(`db-${i}.json`);
+    const _writeNewFiles = () => new Promise((accept, reject) => {
+      const promises = [];
+      const _writeFile = (p, d) => new Promise((accept, reject) => {
+        writeFileAtomic(p, d, err => {
+          if (!err || err.code === 'ENOENT') {
+            accept();
+          } else {
+            reject(err);
           }
-
-          const promises = [];
-          const _removeFile = p => new Promise((accept, reject) => {
-            fs.unlink(p, err => {
-              if (!err || err.code === 'ENOENT') {
-                accept();
-              } else {
-                reject(err);
-              }
-            });
-          });
-          for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-
-            if (!keepFiles.includes(file)) {
-              promises.push(_removeFile(path.join(dataPath, file)));
-            }
-          }
-
-          Promise.all(promises)
-            .then(accept)
-            .catch(reject);
-        } else {
-          reject(err);
-        }
+        });
       });
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        const {height} = block;
+        promises.push(_writeFile(path.join(dbPath, `block-${height}.json`)), JSON.stringify(block, null 2));
+
+        const db = dbs[i];
+        promises.push(_writeFile(path.join(dbPath, `db-${height}.json`)), JSON.stringify(db, null 2));
+      }
+
+      return Promise.all(promises);
     });
-    const _writeNewFile = () => new Promise((accept, reject) => {
-      writeFileAtomic(path.join(dataPath, `db-${db.blocks.length}.json`), JSON.stringify(db, null, 2), err => {
-        if (!err) {
-          accept();
-        } else {
-          reject(err);
-        }
+    const _removeOldFiles = () => new Promise((accept, reject) => {
+      const _removeDbFiles = () => new Promise((accept, reject) => {
+        fs.readdir(dbDataPath, (err, dbFiles) => {
+          if (!err || err.code === 'ENOENT') {
+            dbFiles = dbFiles || [];
+
+            const keepDbFiles = [];
+            for (let i = 0; i < blocks.length; i++) {
+              const block = blocks[i];
+              const {height} = block;
+              keepDbFiles.push(`db-${height}.json`);
+            }
+
+            const promises = [];
+            const _removeFile = p => new Promise((accept, reject) => {
+              fs.unlink(p, err => {
+                if (!err || err.code === 'ENOENT') {
+                  accept();
+                } else {
+                  reject(err);
+                }
+              });
+            });
+            for (let i = 0; i < dbFiles.length; i++) {
+              const dbFile = dbFiles[i];
+
+              if (!keepDbFiles.includes(dbFile)) {
+                promises.push(_removeFile(path.join(dbDataPath, dbFile)));
+              }
+            }
+
+            Promise.all(promises)
+              .then(accept)
+              .catch(reject);
+          } else {
+            reject(err);
+          }
+        });
       });
+      const _removeBlockFiles = new Promise((accept, reject) => {
+        fs.readdir(blocksDataPath, (err, blockFiles) => {
+          if (!err || err.code === 'ENOENT') {
+            blockFiles = blockFiles || [];
+
+            const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+
+            const promises = [];
+            const _removeFile = p => new Promise((accept, reject) => {
+              fs.unlink(p, err => {
+                if (!err || err.code === 'ENOENT') {
+                  accept();
+                } else {
+                  reject(err);
+                }
+              });
+            });
+            for (let i = 0; i < blockFiles.length; i++) {
+              const blockFile = blockFiles[i];
+              const match = blockFile.match(/^block-([0-9]+)\.json$/);
+
+              const _remove = () => {
+                promises.push(_removeFile(path.join(blocksDataPath, blockFile)));
+              };
+
+              if (match) {
+                const height = parseInt(match[1], 10);
+
+                if (height > 0 height <= topBlockHeight) {
+                  // nothing
+                } else {
+                  _remove();
+                } 
+              } else {
+                _remove();
+              }
+            }
+
+            Promise.all(promises)
+              .then(accept)
+              .catch(reject);
+          } else {
+            reject(err);
+          }
+        });
+      });
+
+      return Promise.all([
+        _removeDbFiles(),
+        _removeBlockFiles(),
+      ]);
     });
 
     _ensureDbPath()
+      .then(() => _writeNewFiles())
       .then(() => _removeOldFiles())
-      .then(() => _writeNewFile())
       .then(() => {
         cb();
       })
