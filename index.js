@@ -814,7 +814,6 @@ const _findLocalChargeMessage = (messages, signature) => {
   return null;
 };
 const _findConfirmedChargeMessage = (blocks, chargeSignature) => {
-  const {blocks} = db;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
@@ -1392,7 +1391,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   }
 
   // update message revocations
-  newDb.messageRevocations.push(block.messages.map(({signature}) => signature);
+  newDb.messageRevocations.push(block.messages.map(({signature}) => signature));
   while (newDb.messageRevocations.length > MESSAGE_TTL) {
     newDb.messageRevocations.shift();
   }
@@ -1721,7 +1720,7 @@ const _loadState = () => {
       })();
 
       if (bestBlockHeight > 0) { // load dbs and blocks from disk
-        const _readDbFiles = {
+        const _readDbFiles = () => {
           const candidateHeights = (() => {
             const result = [];
 
@@ -1761,7 +1760,7 @@ const _loadState = () => {
           });
           const _recurse = height => {
             if (height <= bestBlockHeight) {
-              _readBlockFile()
+              _readBlockFile(height)
                 .then(block => {
                   blocks.push(block);
 
@@ -1800,15 +1799,14 @@ const _loadState = () => {
         return Promise.resolve();
       }
     });
-  });
-});
-const _ensureDataPaths = () => new Promise((accept, reject) => {
+};
+const _ensureDataPaths = () => {
   const dataDirectories = [
     dataPath,
     dbDataPath,
     blocksDataPath,
   ];
-  const _ensurePath = p => new Promise((accept, reject) => {
+  const _ensureDirectory = p => new Promise((accept, reject) => {
     mkdirp(p, err => {
       if (!err) {
         accept();
@@ -1817,8 +1815,8 @@ const _ensureDataPaths = () => new Promise((accept, reject) => {
       }
     });
   });
-  return Promise.all(dataDirectories.map(p => _ensureDirectory(p));
-});
+  return Promise.all(dataDirectories.map(p => _ensureDirectory(p)));
+};
 const _saveState = (() => {
   const _doSave = cb => {
     const _writeNewFiles = () => new Promise((accept, reject) => {
@@ -1835,10 +1833,10 @@ const _saveState = (() => {
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
-        promises.push(_writeFile(path.join(dbPath, `block-${height}.json`)), JSON.stringify(block, null 2));
+        promises.push(_writeFile(path.join(dbPath, `block-${height}.json`)), JSON.stringify(block, null, 2));
 
         const db = dbs[i];
-        promises.push(_writeFile(path.join(dbPath, `db-${height}.json`)), JSON.stringify(db, null 2));
+        promises.push(_writeFile(path.join(dbPath, `db-${height}.json`)), JSON.stringify(db, null, 2));
       }
 
       return Promise.all(promises);
@@ -1977,6 +1975,10 @@ const _loadPeers = () => new Promise((accept, reject) => {
         .filter(url => url)
         .map(url => new Peer(url));
       peers = newPeers;
+
+      accept();
+    } else if (err.code === 'ENOENT') {
+      peers = [];
 
       accept();
     } else {
