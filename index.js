@@ -1509,7 +1509,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
           blocks.push(block);
           mempool = newMempool;
 
-          _save();
+          _saveState();
 
           api.emit('block', block);
 
@@ -1531,7 +1531,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
           blocks = newBlocks;
           mempool = newMempool;
 
-          _save();
+          _saveState();
 
           api.emit('block', block);
 
@@ -1655,6 +1655,7 @@ const doHash = () => new Promise((accept, reject) => {
 const dataPath = path.join(__dirname, dataDirectory);
 const dbDataPath = path.join(dataPath, 'db');
 const blocksDataPath = path.join(dataPath, 'blocks');
+const peersDataPath = path.join(dataPath, 'peers.txt');
 const _decorateDb = db => {
   db.charges = db.charges.map(b => Message.from(b));
 };
@@ -1669,7 +1670,7 @@ const _decorateBlocks = blocks => {
     blocks[i] = Block.from(blocks[i]);
   }
 };
-const _load = () => {
+const _loadState = () => {
   const _readdirDbs = () => new Promise((accept, reject) => {
     fs.readdir(dbDataPath, (err, files) => {
       if (!err || err.code === 'ENOENT') {
@@ -1796,19 +1797,24 @@ const _load = () => {
     });
   });
 });
-const _ensureDbPath = () => new Promise((accept, reject) => {
-  mkdirp(dataPath, err => {
-    if (!err) {
-      accept();
-    } else {
-      reject(err);
-    }
+const _ensureDataPaths = () => new Promise((accept, reject) => {
+  const dataDirectories = [
+    dataPath,
+    dbDataPath,
+    blocksDataPath,
+  ];
+  const _ensurePath = p => new Promise((accept, reject) => {
+    mkdirp(p, err => {
+      if (!err) {
+        accept();
+      } else {
+        reject(err);
+      }
+    });
   });
+  return Promise.all(dataDirectories.map(p => _ensureDirectory(p));
 });
-const _save = (() => {
-  let running = false;
-  let queued = false;
-
+const _saveState = (() => {
   const _doSave = cb => {
     const _writeNewFiles = () => new Promise((accept, reject) => {
       const promises = [];
@@ -1924,8 +1930,7 @@ const _save = (() => {
       ]);
     });
 
-    _ensureDbPath()
-      .then(() => _writeNewFiles())
+    _writeNewFiles()
       .then(() => _removeOldFiles())
       .then(() => {
         cb();
@@ -1934,6 +1939,61 @@ const _save = (() => {
         cb(err);
       });
   };
+
+  let running = false;
+  let queued = false;
+  const _recurse = () => {
+    if (!running) {
+      running = true;
+
+      _doSave(err => {
+        if (err) {
+          console.warn(err);
+        }
+
+        running = false;
+
+        if (queued) {
+          queued = false;
+
+          _recurse();
+        }
+      });
+    } else {
+      queued = true;
+    }
+  };
+  return _recurse;
+})();
+const _loadPeers = () => new Promise((accept, reject) => {
+  fs.readFile(peersDataPath, 'utf8', (err, s) => {
+    if (!err) {
+      const newPeers = s.split('\n')
+        .filter(url => url)
+        .map(url => new Peer(url));
+      peers = newPeers;
+
+      accept();
+    } else {
+      reject(err);
+    }
+  });
+});
+const _savePeers = (() => {
+  const _doSave = cb => {
+    const peersString = peers.map(({url}) => url).join('\n') + '\n';
+
+    fs.writeFile(peersDataPath, peersString, err => {
+      if (!err) {
+        cb();
+      } else {
+        cb(err);
+      }
+    });
+  };
+
+  let running = false;
+  let queued = false;
   const _recurse = () => {
     if (!running) {
       running = true;
@@ -2432,7 +2492,7 @@ const _listen = () => {
             peers.push(peer);
           }
 
-          // XXX save these
+          _savePeers();
           // XXX add dynamic enable/disable for these
 
           break;
@@ -2471,7 +2531,7 @@ const _mine = () => {
 
         _commitMainChainBlock(db, blocks, mempool, block);
 
-        _save();
+        _saveState();
       }
 
       mineImmediate = setImmediate(_mine);
@@ -2485,7 +2545,11 @@ const _stopMine = () => {
   mineImmediate = null;
 };
 
-_load()
+Promise.all([
+  _loadState(),
+  _loadPeers(),
+])
+  .then(() => _ensureDataPaths())
   .then(() => _listen())
   .catch(err => {
     console.warn(err);
