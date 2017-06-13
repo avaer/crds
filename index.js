@@ -1733,7 +1733,7 @@ const dbDataPath = path.join(dataPath, 'db');
 const blocksDataPath = path.join(dataPath, 'blocks');
 const peersDataPath = path.join(dataPath, 'peers.txt');
 const _decorateDb = db => {
-  db.charges = db.charges.map(b => Message.from(b));
+  db.charges = db.charges.map(charge => Message.from(charge));
 };
 const _decorateDbs = dbs => {
   for (let i = 0; i < dbs.length; i++) {
@@ -1770,7 +1770,7 @@ const _loadState = () => {
     });
   });
 
-  return Promise.resolve([
+  return Promise.all([
     _readdirDbs(),
     _readdirBlocks(),
   ])
@@ -1779,7 +1779,7 @@ const _loadState = () => {
       blockFiles,
     ]) => {
       const bestBlockHeight = (() => {
-        for (let height = 1; height < blockFiles.length; height++) {
+        for (let height = 1; height <= blockFiles.length; height++) {
           const foundBlockAtThisHeight = blockFiles.some(file => {
             const match = file.match(/^block-([0-9]+)\.json$/);
             return Boolean(match) && parseInt(match[1], 10) === height;
@@ -1789,6 +1789,7 @@ const _loadState = () => {
             return height - 1;
           }
         }
+        return blockFiles.length;
       })();
 
       if (bestBlockHeight > 0) { // load dbs and blocks from disk
@@ -1815,7 +1816,7 @@ const _loadState = () => {
               }
             });
           });
-          return candidateHeights.map(height => _readDbFile(height))
+          return Promise.all(candidateHeights.map(height => _readDbFile(height)));
         };
         const _readBlockFiles = () => new Promise((accept, reject) => {
           const blocks = [];
@@ -1856,7 +1857,7 @@ const _loadState = () => {
           ]) => {
             // NOTE: we are assuming no file corruption
             dbs = newDbs;
-            _decorateDbs(db);
+            _decorateDbs(dbs);
 
             blocks = newBlocks;
             _decorateBlocks(blocks);
