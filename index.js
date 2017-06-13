@@ -55,23 +55,57 @@ class Block {
     return this.hash === block.hash;
   }
 
-  verify() { // XXX make this synchronous
-    const {hash, prevHash, messages} = this;
+  getHash() {
+    const {prevHash, height, difficulty, timestamp, messages} = this;
+    const messagesJson = messages
+      .map(message => JSON.stringify(message))
+      .join('\n');
 
-    const _checkHash = () => {
-      return Promise.resolve(); // XXX check that the hash is difficult enough
-    };
-    const _checkPreviousBlock = () => {
-      return Promise.resolve(); // XXX match to previous block
-    };
+    const uint64Array = new Uint64Array(1);
+    const hashRoot = (() => {
+      const hasher = crypto.createHash('sha256');
+      hasher.update(prevHash);
+      hasher.update(':');
+      uint64Array[0] = height;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      uint64Array[0] = difficulty;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      uint64Array[0] = timestamp;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      hasher.update(messagesJson);
+      hasher.update(':');
+      return hasher.digest();
+    })();
+
+    const hasher = crypto.createHash('sha256');
+    hasher.update(hashRoot);
+    uint64Array[0] = nonce;
+    hasher.update(uint64Array);
+    return hasher.digest('hex');
+  }
+
+  verify() { // XXX this needs to check against a previous block
+    const _checkHash = () => this.getHash() === this.hash;
+    const _checkDifficulty = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
     const _checkMessages = () => Promise.all(messages.map(message => message.verify({block: this})));
 
-    return Promise.all([
-      _checkHash(),
-      _checkPreviousBlock(),
-      _checkMessages(),
-    ])
-      .then(() => {});
+    const checks = [
+      _checkHash,
+      _checkDifficulty,
+      _checkMessages,
+    ];
+    for (let i = 0; i < checks.length; i++) {
+      const check = checks[i];
+      const error = check();
+
+      if (error !== null) {
+        return error;
+      }
+    }
+    return null;
   }
 }
 class Message {
@@ -260,10 +294,12 @@ const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqe
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
 const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
 
+const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
+const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
+const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
 const difficulty = 1e5;
-const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
+const target = _getDifficultyTarget(difficulty);
 
-const _getHashDifficulty = hash => bigint(hash).divide(target).valueOf();
 const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
 const _getConfirmedBalance = (db, address, asset) => {
   let balance = (db.balances[address] || {})[asset];
@@ -1131,7 +1167,7 @@ const _commitSideChainBlock = (db, mempool, block) => {
       const block = blocks[i];
       const {hash} = block;
 
-      result += _getHashDifficulty(hash);
+      result += _getHashDifficulty(hash, target);
     }
 
     return result;
@@ -1218,40 +1254,42 @@ let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
   const timestamp = Date.now();
-  const timestampString = String(timestamp);
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
   const height = db.blocks.length + 1;
-  const heightString = String(height);
-  const difficultyString = String(difficulty);
   const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
-  const blockMessages = mempool.messages.concat(coinbaseMessage);
-  const blockMessagesJson = blockMessages
+  const allMessages = mempool.messages.concat(coinbaseMessage);
+  const allMessagesJson = allMessages
     .map(message => JSON.stringify(message))
     .join('\n');
 
+  const uint64Array = new Uint64Array(1);
   const hashRoot = (() => {
-    const hash = crypto.createHash('sha256');
-    hash.update(prevHash);
-    hash.update(':');
-    hash.update(heightString);
-    hash.update(':');
-    hash.update(difficultyString);
-    hash.update(':');
-    hash.update(timestampString);
-    hash.update(':');
-    hash.update(blockMessagesJson);
-    return hash.digest();
+    const hasher = crypto.createHash('sha256');
+    hasher.update(prevHash);
+    hasher.update(':');
+    uint64Array[0] = height;
+    hasher.update(uint64Array);
+    hasher.update(':');
+    uint64Array[0] = difficulty;
+    hasher.update(uint64Array);
+    hasher.update(':');
+    uint64Array[0] = timestamp;
+    hasher.update(uint64Array);
+    hasher.update(':');
+    hasher.update(allMessagesJson);
+    hasher.update(':');
+    return hasher.digest();
   })();
 
   for (let nonce = 0;; nonce++) {
-    const hash = crypto.createHash('sha256');
-    hash.update(hashRoot);
-    hash.update(String(nonce));
-    const digest = hash.digest('hex');
-    const digestBigint = bigint(digest, 16);
+    const hasher = crypto.createHash('sha256');
+    hasher.update(hashRoot);
+    uint64Array[0] = nonce;
+    hasher.update(uint64Array);
+    const hash = hasher.digest('hex');
 
-    if (digestBigint.leq(target)) {
-      const block = new Block(digest, prevHash, height, difficulty, timestamp, blockMessages, nonce);
+    if (_checkHashMeetsTarget(hash, target)) {
+      const block = new Block(hash, prevHash, height, difficulty, timestamp, blockMessages, nonce);
       accept(block);
 
       return;
