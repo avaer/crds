@@ -1197,7 +1197,7 @@ const _commitSideChainBlock = (db, blocks, mempool, block) => {
     // XXX reorg
   }
 };
-const _addLocalBlock = localBlock => {
+const _addBlock = block => {
   const attachPoint = _findBlockAttachPoint(db, mempool, block);
 
   if (attachPoint !== null) {
@@ -1237,9 +1237,6 @@ const _addLocalBlock = localBlock => {
       error: 'invalid block',
     });
   }
-};
-const _addRemoteBlock = remoteBlock => {
-  console.log('add remote block', remoteBlock); // XXX attach the remote block and verify it
 };
 const _addLocalMessage = localMessage => {
   mempool.messages.push(localMessage);
@@ -2212,12 +2209,12 @@ const _sync = () => {
         switch (type) {
           case 'block': {
             const {block} = m;
-            _addRemoteBlock(block);
+            _addBlock(block);
             break;
           }
           case 'message': {
             const {message} = m;
-            _addRemoteMessage(message);
+            _addMessage(message);
             break;
           }
           default: {
@@ -2241,11 +2238,11 @@ const _sync = () => {
       const limit = UNDO_HEIGHT;
 
       Promise.all([
-        _requestDbs({skip, limit}),
+        _requestDbs({skip, limit}), // XXX rewrite this to fetch blocks instead
         _requestMempool(),
       ])
         .then(([
-          dbs,
+          remoteDbs,
           remoteMempool,
         ]) => {
           const _saveDbs = () => _ensureDbPath()
@@ -2260,15 +2257,22 @@ const _sync = () => {
           };
           const _saveMempool = () => {
             for (let i = 0; i < remoteMempool.length; i++) {
-              const remoteMessage = Message.from(remoteMempool[i]);
-              _addRemoteMessage(remoteMessage);
+              const {blocks, messages} = remoteMempool;
+
+              for (let j = 0; j < blocks.length; j++) {
+                const block = Block.from(blocks[j]);
+                _addBlock(block);
+              }
+              for (let j = 0; j < messages.length; j++) {
+                const message = Message.from(messages[j]);
+                _addMessage(message);
+              }
             }
             return Promise.resolve();
           };
 
           Promise.all([
             _saveDbs(),
-            _saveDb(),
             _saveMempool(),
           ])
             .then(() => {
