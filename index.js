@@ -22,7 +22,8 @@ const BLOCK_VERSION = '0.0.1';
 const MESSAGE_TTL = 10;
 const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
-const WORK_TIME = 20;
+const HASH_WORK_TIME = 20;
+const MIN_NUM_LIVE_PEERS = 10;
 const DEFAULT_DB = {
   balances: {},
   charges: [],
@@ -322,6 +323,10 @@ class Peer {
 
   equals(peer) {
     return this.url === peer.url;
+  }
+
+  isEnabled() {
+    return this._enabled;
   }
 
   enable() {
@@ -1641,7 +1646,7 @@ const doHash = () => new Promise((accept, reject) => {
       const now = Date.now();
       const timeDiff = now - timestamp;
 
-      if (timeDiff > WORK_TIME) {
+      if (timeDiff > HASH_WORK_TIME) {
         accept(null);
 
         return;
@@ -2018,6 +2023,20 @@ const _savePeers = (() => {
   return _recurse;
 })();
 
+const _refreshLivePeers = () => {
+  const enabledPeers = peers.filter(peer => peer.isEnabled());
+  const disabledPeers = peers.filter(peer => !peer.isEnabled());
+
+  while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
+    const disabledPeerIndex = Math.floor(disabledPeers * Math.random());
+    const peer = disabledPeers[disabledPeerIndex];
+    peer.enable();
+
+    disabledPeers.splice(disabledPeerIndex, 1);
+    enabledPeers.push(peer);
+  }
+};
+
 const _listen = () => {
   const app = express();
 
@@ -2279,6 +2298,8 @@ const _listen = () => {
     });
   });
 
+  _refreshLivePeers();
+
   const server = http.createServer(app)
   const wss = new ws.Server({
     noServer: true,
@@ -2490,16 +2511,26 @@ const _listen = () => {
           const peer = new Peer(url);
           if (!peers.some(p => p.equals(peer))) {
             peers.push(peer);
-          }
 
-          _savePeers();
-          // XXX add dynamic enable/disable for these
+            _refreshLivePeers();
+
+            _savePeers();
+          }
 
           break;
         }
         case 'removepeer': {
           const [, url] = split;
-          peers = peers.filter(peer => peer.url === url);
+          const index = peers.findIndex(peer => peer.url === url);
+          if (index !== -1) {
+            const peer = peers[index];
+            peer.disable();
+            peers.splice(index, 1);
+
+            _refreshLivePeers();
+
+            _savePeers();
+          }
 
           break;
         }
