@@ -1278,14 +1278,20 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
   const newBlocks = needsReorg ? sideChainBlocks.slice() : blocks.slice();
   const newMempool = (() => {
     if (needsReorg) {
-      return {
+      const newMempool = {
         blocks: mempool.blocks
-          .concat(slicedBlocks)
-          .filter(mempoolBlock => !addedSideChainBlocks.some(addedSideChainBlock => addedSideChainBlock.hash === mempoolBlock.hash)),
+          .filter(mempoolBlock => !addedSideChainBlocks.some(addedSideChainBlock => addedSideChainBlock.hash === mempoolBlock.hash))
+          .concat(slicedBlocks),
         messages: mempool.messages
-          .concat(slicedMessages)
           .filter(mempoolMessage => !addedSideChainMessages.some(addedSideChainMessage => addedSideChainMessage.signature === mempoolMessage.signature)),
       };
+      // try to re-add sliced messges; they might not be valid anymore so we can't just append them
+      for (let i = 0; i < slicedMessages.length; i++) {
+        const slicedMessage = slicedMessages[i];
+        _addMessage(newDb, newBlocks, newMempool, slicedMessage);
+      }
+
+      return newMempool;
     } else {
       return {
         blocks: mempool.blocks.concat(block),
@@ -1387,12 +1393,12 @@ const _addBlock = block => {
     };
   }
 };
-const _addMessage = message => {
+const _addMessage = (db, blocks, mempool, message) => {
   const db = _getLatestDb();
   const error = message.verify(db, blocks, mempool);
   if (!error) {
     if (!mempool.messages.some(message => message.equals(message))) {
-      mempool.messages.push(message); // XXX need to protect against replay attacks
+      mempool.messages.push(message);
     }
 
     api.emit('message', message);
@@ -1806,10 +1812,8 @@ const _listen = () => {
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
-    const error = message.verify(db, blocks, mempool);
+    const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
-      _addMessage(message);
-
       return Promise.resolve();
     } else {
       return Promise.reject(error);
@@ -1852,10 +1856,8 @@ const _listen = () => {
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
-    const error = message.verify(db, blocks, mempool);
+    const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
-      _addMessage(message);
-
       return Promise.resolve();
     } else {
       return Promise.reject(error);
@@ -1896,10 +1898,8 @@ const _listen = () => {
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
-    const error = message.verify(db, blocks, mempool);
+    const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
-      _addMessage(message);
-
       return Promise.resolve();
     } else {
       return Promise.reject(error);
@@ -1937,10 +1937,8 @@ const _listen = () => {
     const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, startHeight, timestamp});
     const message = new Message(payload, null);
     const db = _getLatestDb();
-    const error = message.verify(db, blocks, mempool);
+    const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
-      _addMessage(message);
-
       return Promise.resolve();
     } else {
       return Promise.reject(error);
@@ -1981,10 +1979,8 @@ const _listen = () => {
     const signatureString = signature.toString('base64');
     const message = new Message(payload, signatureString);
     const db = _getLatestDb();
-    const error = message.verify(db, blocks, mempool);
+    const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
-      _addMessage(message);
-
       return Promise.resolve();
     } else {
       return Promise.reject(error);
@@ -2360,7 +2356,8 @@ const _sync = () => {
           }
           case 'message': {
             const {message} = m;
-            const error = _addMessage(message);
+            const db = _getLatestDb();
+            const error = _addMessage(db, blocks, mempool, message);
             if (error) {
               console.warn('add remote message error:', err);
             }
@@ -2413,7 +2410,8 @@ const _sync = () => {
         }
         for (let i = 0; i < messages.length; i++) {
           const message = Message.from(messages[i]);
-          const error = _addMessage(message);
+          const db = _getLatestDb();
+          const error = _addMessage(db, blocks, mempool, message);
           if (error) {
             console.warn(error);
           }
