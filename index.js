@@ -36,9 +36,11 @@ const port = parseInt(_findArg('port')) || 9999;
 const dataDirectory = _findArg('dataDirectory') || 'db';
 
 class Block {
-  constructor(hash, prevHash, timestamp, messages, nonce) {
+  constructor(hash, prevHash, height, difficulty, timestamp, messages, nonce) {
     this.hash = hash;
     this.prevHash = prevHash;
+    this.height = height;
+    this.difficulty = difficulty;
     this.timestamp = timestamp;
     this.messages = messages;
     this.nonce = nonce;
@@ -46,7 +48,7 @@ class Block {
 
   static from(o) {
     const {hash, prevHash, timestamp, messages, nonce} = o;
-    return new Block(hash, prevHash, timestamp, messages.map(message => Message.from(message)), nonce);
+    return new Block(hash, prevHash, height, difficulty, timestamp, messages.map(message => Message.from(message)), nonce);
   }
 
   equals(block) {
@@ -1060,9 +1062,12 @@ const _addRemoteMessage = remoteMessage => {
 let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
-  const start = Date.now();
-  const startString = String(start);
+  const timestamp = Date.now();
+  const timestampString = String(timestamp);
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
+  const height = db.blocks.length;
+  const heightString = String(height);
+  const difficultyString = String(difficulty);
   const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
   const blockMessages = mempool.messages.concat(coinbaseMessage);
   const blockMessagesJson = blockMessages
@@ -1073,7 +1078,11 @@ const doHash = () => new Promise((accept, reject) => {
     const hash = crypto.createHash('sha256');
     hash.update(prevHash);
     hash.update(':');
-    hash.update(startString);
+    hash.update(heightString);
+    hash.update(':');
+    hash.update(difficultyString);
+    hash.update(':');
+    hash.update(timestampString);
     hash.update(':');
     hash.update(blockMessagesJson);
     return hash.digest();
@@ -1087,13 +1096,13 @@ const doHash = () => new Promise((accept, reject) => {
     const digestBigint = bigint(digest, 16);
 
     if (digestBigint.leq(target)) {
-      const block = new Block(digest, prevHash, start, blockMessages, nonce);
+      const block = new Block(digest, prevHash, height, difficulty, timestamp, blockMessages, nonce);
       accept(block);
 
       return;
     } else {
       const now = Date.now();
-      const timeDiff = now - start;
+      const timeDiff = now - timestamp;
 
       if (timeDiff > WORK_TIME) {
         accept(null);
