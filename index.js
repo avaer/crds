@@ -1830,7 +1830,7 @@ const _loadState = () => {
               return Boolean(match) && parseInt(match[1], 10) === height;
             });
             for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
-              result.push(i);
+              result.unshift(i);
             }
             return result;
           })();
