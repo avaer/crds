@@ -892,11 +892,21 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
   return minter;
 };
-const _findBlockAttachPoint = (db, mempool, block) => {
+const _checkBlockExists = (blocks, mempool, block) => {
+  const {height} = block;
+  const comittedBlock = blocks[height - 1];
+
+  if (comittedBlock.hash === block.hash) {
+    return true;
+  } else {
+    return mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash && mempoolBlock.height === block.height);
+  }
+};
+const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
 
-  if (((height - 1) >= (db.blocks.length - UNDO_HEIGHT)) && ((height - 1) < db.blocks.length)) {
-    const candidateMainChainBlock = db.blocks[height - 1];
+  if (((height - 1) >= (blocks.length - UNDO_HEIGHT)) && ((height - 1) < blocks.length)) {
+    const candidateMainChainBlock = blocks[height - 1];
 
     if (candidateMainChainBlock.hash === prevHash && candidateMainChainBlock.height === (height - 1)) {
       return { // valid on main chain
@@ -916,7 +926,7 @@ const _findBlockAttachPoint = (db, mempool, block) => {
       }
     }
   } else {
-    if ((height - 1) < (db.blocks.length - UNDO_HEIGHT)) {
+    if ((height - 1) < (blocks.length - UNDO_HEIGHT)) {
       return {
         type: 'outOfRange',
         direction: -1,
@@ -1199,43 +1209,50 @@ const _commitSideChainBlock = (db, blocks, mempool, block) => {
   }
 };
 const _addBlock = block => {
-  const attachPoint = _findBlockAttachPoint(db, mempool, block);
+  if (!_checkBlockExists(blocks, mempool, block)) {
+    const attachPoint = _findBlockAttachPoint(blocks, mempool, block);
 
-  if (attachPoint !== null) {
-    const {type} = attachPoint;
+    if (attachPoint !== null) {
+      const {type} = attachPoint;
 
-    if (type === 'mainChain') {
-      const {prevBlock} = attachPoint; // XXX verify the block first and return the error
+      if (type === 'mainChain') {
+        const {prevBlock} = attachPoint; // XXX verify the block first and return the error
 
-      _commitMainChainBlock(db, blocks, mempool, block);
-    } else if (type === 'sideChain') {
-      const {prevBlock} = attachPoint; // XXX verify the block first and return the error
+        _commitMainChainBlock(db, blocks, mempool, block);
+      } else if (type === 'sideChain') {
+        const {prevBlock} = attachPoint; // XXX verify the block first and return the error
 
-      _commitSideChainBlock(db, blocks, mempool, block);
-    } else if (type === 'outOfRange') {
-      const {direction} = attachPoint;
+        _commitSideChainBlock(db, blocks, mempool, block);
+      } else if (type === 'outOfRange') {
+        const {direction} = attachPoint;
 
-      if (direction === -1) {
-        return {
-          status: 400,
-          error: 'stale block',
-        };
+        if (direction === -1) {
+          return {
+            status: 400,
+            error: 'stale block',
+          };
+        } else {
+          return {
+            status: 400,
+            error: 'desynchronized block',
+          };
+        }
       } else {
         return {
           status: 400,
-          error: 'desynchronized block',
+          error: 'internal block attach error',
         };
       }
     } else {
       return {
         status: 400,
-        error: 'internal block attach error',
+        error: 'invalid block',
       };
     }
   } else {
     return {
       status: 400,
-      error: 'invalid block',
+      error: 'block exists',
     };
   }
 };
@@ -1884,11 +1901,6 @@ const _listen = () => {
       blockcount,
     });
   });
-  app.get('/db', (req, res, next) => {
-    const db = _getLatestDb();
-
-    res.json(db);
-  });
 
   const server = http.createServer(app)
   const wss = new ws.Server({
@@ -2142,18 +2154,6 @@ const _stopMine = () => {
 const _sync = () => {
   const peer = peers[Math.floor(Math.random() * peers.length)];
 
-  const _requestBlockCount = () => new Promise((accept, reject) => {
-    request(peer + '/blockcount', {
-      json: true,
-    }, (err, res, body) => {
-      if (!err) {
-        const {blockcount} = body;
-        accept(blockcount);
-      } else {
-        reject(err);
-      }
-    });
-  });
   const _requestSaveDb = (height, db) => new Promise((accept, reject) => {
     writeFileAtomic(path.join(dataPath, `db-${height}.json`), JSON.stringify(db, null, 2), err => {
       if (!err) {
@@ -2171,11 +2171,15 @@ const _sync = () => {
     }
     return Promise.all(promises);
   };
-  const _requestDbs = ({skip, limit}) => new Promise((accept, reject) => {
-    request(peer + '/db?' + querystring.stringify({
-      skip,
-      limit,
-    }), {
+  const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
+    const q = {};
+    if (skip !== undefined) {
+      q.skip = skip;
+    }
+    if (limit !== undefined) {
+      q.limit = limit;
+    }
+    request(peer + '/blocks?' + querystring.stringify(q), {
       json: true,
     }, (err, res, body) => {
       if (!err) {
@@ -2239,65 +2243,59 @@ const _sync = () => {
     });
   };
 
-  _requestBlockCount()
-    .then(blockcount => {
-      const skip = Math.max(blockcount - UNDO_HEIGHT, 0);
-      const limit = UNDO_HEIGHT;
+  Promise.all([
+    _requestBlocks({
+      skip: Math.max(blocks.length - 10, 0),
+    }),
+    _requestMempool(),
+  ])
+    .then(([
+      remoteBlocks,
+      remoteMempool,
+    ]) => {
+      const _addBlocks = () => {
+        for (let i = 0; i < remoteBlocks.length; i++) {
+          const block = remoteBlocks[i];
+          const error = _addBlock(block);
+          if (error) {
+            console.warn(error);
+          }
+        }
+        return Promise.resolve();
+      };
+      const _addMempool = () => {
+        const {blocks, messages} = remoteMempool;
+
+        for (let i = 0; i < blocks.length; i++) {
+          const block = Block.from(blocks[i]);
+          const error = _addBlock(block);
+          if (error) {
+            console.warn(error);
+          }
+        }
+        for (let i = 0; i < messages.length; i++) {
+          const message = Message.from(messages[i]);
+          const error = _addMessage(message);
+          if (error) {
+            console.warn(error);
+          }
+        }
+        return Promise.resolve();
+      };
 
       Promise.all([
-        _requestDbs({skip, limit}), // XXX rewrite this to fetch blocks instead
-        _requestMempool(),
+        _addBlocks(),
+        _addMempool(),
       ])
-        .then(([
-          remoteDbs,
-          remoteMempool,
-        ]) => {
-          const _saveDbs = () => _ensureDbPath()
-            .then(() => _requestSaveDbs(skip, dbs));
-          const _saveDb = () => {
-            if (dbs.length > 0) {
-              db = dbs[dbs.length - 1];
-              _decorateDb(db);
-            }
+        .then(() => {
+          _connect();
 
-            return Promise.resolve();
-          };
-          const _saveMempool = () => {
-            for (let i = 0; i < remoteMempool.length; i++) {
-              const {blocks, messages} = remoteMempool;
-
-              for (let j = 0; j < blocks.length; j++) {
-                const block = Block.from(blocks[j]);
-                const error = _addBlock(block);
-                if (error) {
-                  console.warn(error);
-                }
-              }
-              for (let j = 0; j < messages.length; j++) {
-                const message = Message.from(messages[j]);
-                const error = _addMessage(message);
-                if (error) {
-                  console.warn(error);
-                }
-              }
-            }
-            return Promise.resolve();
-          };
-
-          Promise.all([
-            _saveDbs(),
-            _saveMempool(),
-          ])
-            .then(() => {
-              _connect();
-
-              console.log('synced'); // XXX
-            })
-            .catch(err => {
-              console.warn(err);
-            });
+          console.log('synced'); // XXX
         })
-  });
+        .catch(err => {
+          console.warn(err);
+        });
+    });
 };
 
 _load()
