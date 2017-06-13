@@ -1199,7 +1199,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     newDb.messageRevocations.shift();
   }
 
-  const newMempool = {
+  const newMempool = mempool && {
     blocks: mempool.blocks.filter(mempoolBlock => mempoolBlock.hash !== block.hash),
     messages: mempool.messages.filter(mempoolMessage => !block.messages.some(blockMessage => blockMessage === mempoolMessage.signature)),
   };
@@ -1223,40 +1223,48 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
   const sideChainDifficulty = _getBlocksDifficulty(sideChainBlocks.slice(forkedBlock.height - 1));
   const needsReorg = sideChainDifficulty > mainChainDifficulty;
 
+  const _getBlocksMessages = blocks => {
+    const result = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      const {messages} = block;
+
+      for (let j = 0; j < messages; j++) {
+        const message = messages[j];
+        result.push(message);
+      }
+    }
+    return result;
+  };
+  const forkedBlockIndex = forkedBlock.height - 1;
+  const numSlicedBlocks = blocks.length - forkedBlockIndex - 1;
+  const slicedBlocks = blocks.slice(-numSlicedBlocks);
+  const slicedMessages = _getBlocksMessages(slicedBlocks);
+  const numAddedSideChainBlocks = sidechainBlocks.length - forkedBlockIndex - 1;
+  const addedSideChainBlocks = sideChainBlocks.slice(-numAddedSideChainBlocks);
+  const addedSideChainMessages = _getBlocksMessages(addedSideChainBlocks);
+
   const newDbs = (() => {
     if (needsReorg) {
-      // XXX
+      let localDb = (numSlicedBlocks < dbs.length) ? dbs[dbs.length - (numSlicedBlocks + 1)] : DEFAULT_DB;
+      let localBlocks = blocks.slice(0, -numSlicedBlocks);
+
+      for (let i = 0; i < addedSideChainBlocks; i++) {
+        const addedSideChainBlock = addedSideChainBlocks;
+        const {newDb} = _commitMainChainBlock(localDb, localBlocks, null, addedSideChainBlock);
+        localDb = newDb;
+        localBlocks.push(addedSideChainBlock);
+      }
+
+      return localDb;
     } else {
       return dbs.slice();
     }
   })();
+
   const newBlocks = needsReorg ? sideChainBlocks.slice() : blocks.slice();
   const newMempool = (() => {
     if (needsReorg) {
-      const _getDbsMessages = dbs => {
-        const result = [];
-        for (let i = 0; i < dbs.length; i++) {
-          const db = dbs[i];
-          const {messages} = db;
-
-          for (let j = 0; j < messages; j++) {
-            const message = messages[j];
-            result.push(message);
-          }
-        }
-        return result;
-      };
-
-      const forkedBlockIndex = forkedBlock.height - 1;
-      const numSlicedBlocks = blocks.length - forkedBlockIndex;
-      const slicedBlocks = dbs.slice(-numSlicedBlocks);
-      const slicedDbs = dbs.slice(-numSlicedBlocks);
-      const slicedMessages = _getDbsMessages(slicedDbs);
-      const numAddedSideChainBlocks = sidechainBlocks.length - forkedBlockIndex;
-      const addedSideChainBlocks = sideChainBlocks.slice(-numAddedSideChainBlocks);
-      const addedSideChainDbs = newDbs.slice(-numAddedSideChainBlocks);
-      const addedSideChainMessages = _getDbsMessages(addedSideChainDbs);
-
       return {
         blocks: mempool.blocks
           .concat(slicedBlocks)
