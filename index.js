@@ -2490,6 +2490,7 @@ const _listen = () => {
         }
         case 'balances': {
           const [, address] = split;
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
           const balances = _getConfirmedBalances(db, address);
           console.log(JSON.stringify(balances, null, 2));
           process.stdout.write('> ');
@@ -2497,6 +2498,7 @@ const _listen = () => {
         }
         case 'balances': {
           const [, address, asset] = split;
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
           const balance = _getConfirmedBalance(db, address, asset);
           console.log(JSON.stringify(balance, null, 2));
           process.stdout.write('> ');
@@ -2504,6 +2506,7 @@ const _listen = () => {
         }
         case 'minter': {
           const [, asset] = split;
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
           const minter = _getUnconfirmedMinter(db, mempool, asset);
           console.log(JSON.stringify(minter, null, 2));
           process.stdout.write('> ');
@@ -2511,6 +2514,7 @@ const _listen = () => {
         }
         case 'minters': {
           const [, asset] = split;
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
           console.log(JSON.stringify(db.minters, null, 2));
           process.stdout.write('> ');
           break;
