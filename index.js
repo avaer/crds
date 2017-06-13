@@ -1444,12 +1444,17 @@ const _listen = () => {
     const payload = JSON.stringify({type: 'send', asset, quantity, srcAddress, dstAddress, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
-    return eccrypto.sign(privateKeyBuffer, payloadHash)
-      .then(signature => {
-        const signatureString = signature.toString('base64');
-        const message = new Message(payload, signatureString);
-        _addLocalMessage(message);
-      });
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const error = message.verify();
+    if (error === null) {
+      _addLocalMessage(message);
+
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
   };
   app.post('/createSend', bodyParserJson, (req, res, next) => {
     const {body} = req;
@@ -1483,13 +1488,17 @@ const _listen = () => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const payload = JSON.stringify({type: 'minter', address, asset, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const error = message.verify();
+    if (error === null) {
+      _addLocalMessage(message);
 
-    return eccrypto.sign(privateKeyBuffer, payloadHash)
-      .then(signature => {
-        const signatureString = signature.toString('base64');
-        const message = new Message(payload, signatureString);
-        _addLocalMessage(message);
-      });
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
   };
   app.post('/createMinter', bodyParserJson, (req, res, next) => {
     const {body} = req;
@@ -1521,13 +1530,17 @@ const _listen = () => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const payload = JSON.stringify({type: 'mint', asset, quantity, address, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const error = message.verify();
+    if (error === null) {
+      _addLocalMessage(message);
 
-    return eccrypto.sign(privateKeyBuffer, payloadHash)
-      .then(signature => {
-        const signatureString = signature.toString('base64');
-        const message = new Message(payload, signatureString);
-        _addLocalMessage(message);
-      });
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
   };
   app.post('/createMint', bodyParserJson, (req, res, next) => {
     const {body} = req;
@@ -1601,14 +1614,17 @@ const _listen = () => {
   const _createChargeback = ({chargeSignature, timestamp, privateKey}) => {
     const payload = JSON.stringify({type: 'chargeback', chargeSignature, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const error = message.verify();
+    if (error === null) {
+      _addLocalMessage(message);
 
-    return eccrypto.sign(privateKeyBuffer, payloadHash)
-      .then(signature => {
-        const signatureString = signature.toString('base64');
-        const message = new Message(payload, signatureString);
-
-        _addLocalMessage(message);
-      });
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
   };
   app.post('/createChargeback', bodyParserJson, (req, res, next) => {
     const {body} = req;
