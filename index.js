@@ -1905,10 +1905,10 @@ const _saveState = (() => {
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
-        promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`)), JSON.stringify(block, null, 2));
+        promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
 
         const db = dbs[i];
-        promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`)), JSON.stringify(db, null, 2));
+        promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
       }
 
       return Promise.all(promises);
