@@ -18,6 +18,7 @@ const replHistory = require('repl.history');
 const bigint = require('big-integer');
 const eccrypto = require('eccrypto-sync');
 
+const BLOCK_VERSION = '0.0.1';
 const WORK_TIME = 20;
 const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
@@ -1204,57 +1205,57 @@ const _addBlock = block => {
     const {type} = attachPoint;
 
     if (type === 'mainChain') {
-      const {prevBlock} = attachPoint; // XXX verify the block first
+      const {prevBlock} = attachPoint; // XXX verify the block first and return the error
 
       _commitMainChainBlock(db, blocks, mempool, block);
     } else if (type === 'sideChain') {
-      const {prevBlock} = attachPoint; // XXX verify the block first
+      const {prevBlock} = attachPoint; // XXX verify the block first and return the error
 
       _commitSideChainBlock(db, blocks, mempool, block);
     } else if (type === 'outOfRange') {
       const {direction} = attachPoint;
 
       if (direction === -1) {
-        return Promise.reject({
+        return {
           status: 400,
           error: 'stale block',
-        });
+        };
       } else {
-        return Promise.reject({
+        return {
           status: 400,
           error: 'desynchronized block',
-        });
+        };
       }
     } else {
-      return Promise.reject({
+      return {
         status: 400,
         error: 'internal block attach error',
-      });
+      };
     }
   } else {
-    return Promise.reject({
+    return {
       status: 400,
       error: 'invalid block',
-    });
+    };
   }
 };
-const _addLocalMessage = localMessage => {
-  mempool.messages.push(localMessage);
+const _addMessage = message => {
+  const db = _getLatestDb();
+  const error = message.verify(db, blocks, mempool);
+  if (!error) {
+    if (!mempool.messages.some(message => message.equals(message))) {
+      mempool.messages.push(message); // XXX need to protect against replay attacks
+    }
 
-  api.emit('message', localMessage);
-}
-const _addRemoteMessage = remoteMessage => {
-  if (!mempool.messages.some(message => message.equals(remoteMessage))) { // XXX validate the message here
-    mempool.messages.push(remoteMessage);
-
-    api.emit('message', remoteMessage);
+    api.emit('message', message);
   }
+  return error;
 };
 
 let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
-  const version = '0.0.1';
+  const version = BLOCK_VERSION;
   const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : bigint(0).toString(16);
   const height = blocks.length + 1;
@@ -1657,7 +1658,7 @@ const _listen = () => {
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
     if (error === null) {
-      _addLocalMessage(message);
+      _addMessage(message);
 
       return Promise.resolve();
     } else {
@@ -1702,7 +1703,7 @@ const _listen = () => {
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
     if (error === null) {
-      _addLocalMessage(message);
+      _addMessage(message);
 
       return Promise.resolve();
     } else {
@@ -1745,7 +1746,7 @@ const _listen = () => {
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
     if (error === null) {
-      _addLocalMessage(message);
+      _addMessage(message);
 
       return Promise.resolve();
     } else {
@@ -1785,7 +1786,7 @@ const _listen = () => {
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
     if (error === null) {
-      _addLocalMessage(message);
+      _addMessage(message);
 
       return Promise.resolve();
     } else {
@@ -1828,7 +1829,7 @@ const _listen = () => {
     const db = _getLatestDb();
     const error = message.verify(db, blocks, mempool);
     if (error === null) {
-      _addLocalMessage(message);
+      _addMessage(message);
 
       return Promise.resolve();
     } else {
@@ -2209,12 +2210,18 @@ const _sync = () => {
         switch (type) {
           case 'block': {
             const {block} = m;
-            _addBlock(block);
+            const error = _addBlock(block);
+            if (error) {
+              console.warn('add remote block error:', err);
+            }
             break;
           }
           case 'message': {
             const {message} = m;
-            _addMessage(message);
+            const error = _addMessage(message);
+            if (error) {
+              console.warn('add remote message error:', err);
+            }
             break;
           }
           default: {
@@ -2261,11 +2268,17 @@ const _sync = () => {
 
               for (let j = 0; j < blocks.length; j++) {
                 const block = Block.from(blocks[j]);
-                _addBlock(block);
+                const error = _addBlock(block);
+                if (error) {
+                  console.warn(error);
+                }
               }
               for (let j = 0; j < messages.length; j++) {
                 const message = Message.from(messages[j]);
-                _addMessage(message);
+                const error = _addMessage(message);
+                if (error) {
+                  console.warn(error);
+                }
               }
             }
             return Promise.resolve();
