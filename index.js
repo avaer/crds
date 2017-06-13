@@ -932,11 +932,12 @@ const _checkBlockExists = (blocks, mempool, block) => {
 };
 const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
+  const blockIndex = height - 1;
 
-  if (((height - 1) >= (blocks.length - UNDO_HEIGHT)) && ((height - 1) < blocks.length)) {
-    const candidateTopMainChainBlock = blocks[blocks.length - 1];
+  if ((blockIndex >= Math.max(blocks.length - UNDO_HEIGHT, 0)) && (blockIndex < blocks.length)) {
+    const candidateTopMainChainBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
 
-    if (candidateTopMainChainBlock.hash === prevHash) {
+    if (candidateTopMainChainBlockHash === prevHash) {
       return { // valid on main chain
         type: 'mainChain',
       };
@@ -958,9 +959,17 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
           sideChainBlocks: blocks.slice(0, forkedBlock.height).concat(extraBlocks),
         };
       } else {
-        return {
-          type: 'dangling',
-        };
+        if (height === 1) {
+          return { // valid initial block
+            type: 'sideChain',
+            forkedBlock: null,
+            sideChainBlocks: [block],
+          };
+        } else {
+          return {
+            type: 'dangling',
+          };
+        }
       }
     }
   } else {
@@ -1209,7 +1218,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     newMempool,
   };
 };
-const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
+const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => { // XXX handle null forkedBlock
   const _getBlocksDifficulty = blocks => {
     let result = 0;
     for (let i = 0; i < blocks.length; i++) {
