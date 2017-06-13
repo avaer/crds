@@ -270,6 +270,7 @@ const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOX
 const difficulty = 1e5;
 const target = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty))
 
+const _getHashDifficulty = hash => bigint(hash).divide(target).valueOf();
 const _getConfirmedBalances = (db, address) => JSON.parse(JSON.stringify(db.balances[address] || {}));
 const _getConfirmedBalance = (db, address, asset) => {
   let balance = (db.balances[address] || {})[asset];
@@ -857,7 +858,45 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
   return minter;
 };
-const _commitBlock = (db, mempool, block) => {
+const _findBlockAttachPoint = (db, mempool, block) => {
+  const {prevHash, height} = block;
+
+  if (((height - 1) >= (db.blocks.length - 10)) && ((height - 1) < db.blocks.length)) {
+    const candidateMainChainBlock = db.blocks[height - 1];
+
+    if (candidateMainChainBlock.hash === prevHash && candidateMainChainBlock.height === (height - 1)) {
+      return { // valid on main chain
+        type: 'mainChain',
+        prevBlock: candidateMainChainBlock,
+      };
+    } else {
+      const candidateSideChainBlock = mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash && mempoolBlock.height === height);
+
+      if (candidateSideChainBlock) {
+        return { // valid side chain
+          type: 'sideChain',
+          prevBlock: candidateSideChainBlock,
+        };
+      } else {
+        return null; // in range, invalid previous hash
+      }
+    }
+  } else {
+    if ((height - 1) < (db.blocks.length - 10)) {
+      return {
+        type: 'outOfRange',
+        direction: -1,
+      };
+    } else {
+      return {
+        type: 'outOfRange',
+        direction: 1,
+      };
+    }
+  }
+};
+
+const _commitMainChainBlock = (db, mempool, block) => {
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
@@ -1043,13 +1082,136 @@ const _commitBlock = (db, mempool, block) => {
 
   // XXX expire invalid messages
 };
+const _commitSideChainBlock = (db, mempool, block) => {
+  // add block to mempool
+  if (!mempool.blocks.some(mempoolBlock => mempoolBlock.hash === block.hash)) {
+    mempool.blocks.push(block);
+  }
+
+  // consider sidechain reorg
+  const _getPreviousMainChainBlock = block => {
+    const {prevHash, height} = block;
+
+    if (((height - 1) >= 0) && ((height - 1) < db.blocks.length)) {
+      const candidateMainChainBlock = db.blocks[height - 1];
+
+      if (candidateMainChainBlock.hash === prevHash) {
+        return candidateMainChainBlock;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  };
+  const _getPreviousMempoolBlock = block => {
+    const {prevHash} = block;
+    return mempool.blocks.find(mempoolBlock => mempoolBlock.hash === prevHash) || null;
+  };
+  const forkedBlock = (() => {
+    let b = block;
+
+    for (;;) {
+      const previousMainChainBlock = _getPreviousMainChainBlock(b);
+
+      if (previousMainChainBlock !== null) {
+        return previousMainChainBlock;
+      } else {
+        const previousMempoolBlock = _getPreviousMempoolBlock(b);
+
+        if (previousMempoolBlock !== null) {
+          b = previousMempoolBlock;
+
+          continue;
+        } else {
+          return null;
+        }
+      }
+    }
+  })();
+  const {height: forkedBlockHeight} = forkedBlock;
+
+  const _getBlocksDifficulty = blocks => {
+    let result = 0;
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      const {hash} = block;
+
+      result += _getHashDifficulty(hash);
+    }
+
+    return result;
+  };
+  const _getSideChainBlocks = (block, forkedBlock) => {
+    const result = [block];
+
+    let b = block;
+    for (;;) {
+      const prevBlock = _getPreviousMempoolBlock(b) || _getPreviousMempoolBlock(b);
+
+      result.push(prevBlock);
+
+      if (prevBlock.hash === forkedBlock.hash) {
+        break;
+      }
+    }
+    return result;
+  };
+  const mainChainDifficulty = _getBlocksDifficulty(db.blocks.slice(forkedBlockHeight - 1));
+  const sideChainDifficulty = _getBlocksDifficulty(_getSideChainBlocks(block, forkedBlock));
+  if (sideChainDifficulty > mainChainDifficulty) {
+    // XXX reorg
+  }
+};
+const _addLocalBlock = localBlock => {
+  const attachPoint = _findBlockAttachPoint(db, mempool, block);
+
+  if (attachPoint !== null) {
+    const {type} = attachPoint;
+
+    if (type === 'mainChain') {
+      const {prevBlock} = attachPoint; // XXX verify the block first
+      _commitMainChainBlock(db, mempool, block);
+    } else if (type === 'sideChain') {
+      const {prevBlock} = attachPoint; // XXX verify the block first
+
+      _commitSideChainBlock(db, mempool, block);
+    } else if (type === 'outOfRange') {
+      const {direction} = attachPoint;
+
+      if (direction === -1) {
+        return Promise.reject({
+          status: 400,
+          error: 'old block',
+        });
+      } else {
+        // XXX resynchronize
+        return Promise.reject({
+          status: 400,
+          error: 'new block',
+        });
+      }
+    } else {
+      return Promise.reject({
+        status: 400,
+        error: 'internal block attach error',
+      });
+    }
+  } else {
+    return Promise.reject({
+      status: 400,
+      error: 'invalid block',
+    });
+  }
+};
 const _addRemoteBlock = remoteBlock => {
   console.log('add remote block', remoteBlock); // XXX finish this
 };
-const _addLocalMessage = message => {
-  mempool.messages.push(message);
+const _addLocalMessage = localMessage => {
+  mempool.messages.push(localMessage);
 
-  api.emit('message', message);
+  api.emit('message', localMessage);
 }
 const _addRemoteMessage = remoteMessage => {
   if (!mempool.messages.some(message => message.equals(remoteMessage))) { // XXX validate the message here
@@ -1065,7 +1227,7 @@ const doHash = () => new Promise((accept, reject) => {
   const timestamp = Date.now();
   const timestampString = String(timestamp);
   const prevHash = db.blocks.length > 0 ? db.blocks[db.blocks.length - 1].hash : bigint(0).toString(16);
-  const height = db.blocks.length;
+  const height = db.blocks.length + 1;
   const heightString = String(height);
   const difficultyString = String(difficulty);
   const coinbaseMessage = new Message(JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: publicKey.toString('base64'), timestamp: Date.now()}), null);
@@ -1778,7 +1940,7 @@ const _mine = () => {
         lastBlockTime = now;
         numHashes = 0;
 
-        _commitBlock(db, mempool, block);
+        _commitMainChainBlock(db, mempool, block);
 
         _save();
       }
