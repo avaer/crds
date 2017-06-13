@@ -24,12 +24,14 @@ const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
 const HASH_WORK_TIME = 20;
 const MIN_NUM_LIVE_PEERS = 10;
+const CRD = 'CRD';
+const COINBASE_QUANTITY = 1;
 const DEFAULT_DB = {
   balances: {},
   charges: [],
   messageRevocations: [],
   minters: {
-    'CRD': null,
+    [CRD]: null,
   },
 };
 
@@ -45,7 +47,7 @@ const _findArg = name => {
   return null;
 };
 const port = parseInt(_findArg('port')) || 9999;
-const dataDirectory = _findArg('dataDirectory') || 'db';
+const dataDirectory = _findArg('dataDirectory') || 'data';
 
 class Block {
   constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
@@ -182,6 +184,20 @@ class Message {
         const {type} = payloadJson;
 
         switch (type) {
+          case 'coinbase': {
+            const {asset, quantity, address} = payloadJson;
+
+            if (asset === CRD && quantity === COINBASE_QUANTITY && address) {
+              return null;
+            } else {
+              return {
+                status: 400,
+                error: 'invalid coinbase',
+              };
+            }
+
+            break;
+          }
           case 'send': {
             const {asset, quantity, srcAddress} = payloadJson;
             const publicKey = srcAddress;
@@ -569,16 +585,17 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
 
     if (type === 'coinbase') {
       const {asset, quantity, address} = payloadJson;
-      let dstAddressEntry = db.balances[address];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        result[dstAddress] = dstAddressEntry;
+
+      let addressEntry = db.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
       }
-      let dstAssetEntry = dstAddressEntry[asset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
       }
-      dstAddressEntry[asset] = dstAssetEntry + quantity;
+      addressEntry[asset] = assetEntry + quantity;
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
@@ -632,8 +649,9 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
     const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = payloadJson;
-      if (a === asset && dstAddress === address) {
+      const {asset: localAsset, quantity, address: localAddress} = payloadJson;
+
+      if (localAsset === asset && localAddress === address) {
         result += quantity;
       }
     } else if (type === 'send') {
@@ -669,16 +687,17 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
 
     if (type === 'coinbase') {
       const {asset: a, quantity, address} = payloadJson;
-      let dstAddressEntry = db.balances[address];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        result[dstAddress] = dstAddressEntry;
+
+      let addressEntry = db.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
       }
-      let dstAssetEntry = dstAddressEntry[asset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
       }
-      dstAddressEntry[asset] = dstAssetEntry + quantity;
+      addressEntry[asset] = assetEntry + quantity;
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
@@ -760,8 +779,9 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
     const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity} = payloadJson;
-      if (a === asset && dstAddress === address) {
+      const {asset: localAsset, quantity, address: localAddress} = payloadJson;
+
+      if (localAsset === asset && localAddress === address) {
         result += quantity;
       }
     } else if (type === 'send') {
@@ -1255,19 +1275,19 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset, quantity, dstAddress} = payloadJson;
+      const {asset, quantity, address} = payloadJson;
 
-      let dstAddressEntry = newDb.balances[dstAddress];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        newDb.balances[dstAddress] = dstAddressEntry;
+      let addressEntry = newDb.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        newDb.balances[address] = addressEntry;
       }
-      let dstAssetEntry = dstAddressEntry[asset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
       }
-      dstAssetEntry += quantity;
-      dstAddressEntry[asset] = dstAssetEntry;
+      assetEntry += quantity;
+      addressEntry[asset] = assetEntry;
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
@@ -1625,7 +1645,7 @@ const doHash = () => new Promise((accept, reject) => {
   const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const height = blocks.length + 1;
-  const payload = JSON.stringify({type: 'coinbase', asset: 'CRD', quantity: 50, dstAddress: minePublicKey, startHeight: height, timestamp: Date.now()});
+  const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: minePublicKey, startHeight: height, timestamp: Date.now()});
   const signature = null;
   const coinbaseMessage = new Message(payload, signature);
   const allMessages = mempool.messages.concat(coinbaseMessage);
@@ -1858,10 +1878,10 @@ const _saveState = (() => {
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
-        promises.push(_writeFile(path.join(dbPath, `block-${height}.json`)), JSON.stringify(block, null, 2));
+        promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`)), JSON.stringify(block, null, 2));
 
         const db = dbs[i];
-        promises.push(_writeFile(path.join(dbPath, `db-${height}.json`)), JSON.stringify(db, null, 2));
+        promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`)), JSON.stringify(db, null, 2));
       }
 
       return Promise.all(promises);
