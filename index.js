@@ -2864,6 +2864,8 @@ const _mine = () => {
     });
 };
 const _startMine = publicKey => {
+  _stopMine();
+
   minePublicKey = publicKey;
   mineImmediate = setImmediate(_mine);
 };
