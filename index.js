@@ -2513,7 +2513,7 @@ const _listen = () => {
     }
   });
 
-  app.get('/block/:height', (req, res, next) => {
+  app.get('/blocks/:height', (req, res, next) => {
     const {height: heightStirng} = req.params;
     const height = parseInt(heightStirng, 10);
 
