@@ -985,6 +985,36 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
+const _getConfirmedCharges = (db, address) => db.charges.filter(charge => {
+  const payloadJson = JSON.parse(charge.payload);
+  const {srcAddress, dstAddress} = payloadJson;
+  return srcAddress === address || dstAddress === address;
+});
+const _getUnconfirmedCharges = (db, mempool, address) => {
+  const result = _getConfirmedCharges(db, address);
+
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'charge') {
+      result.push(message);
+    }
+  }
+
+  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
+  for (let i = 0; i < invalidatedCharges.length; i++) {
+    const invalidatedCharge = invalidatedCharges[i];
+    const index = result.findIndex(charge => charge.signature === invalidatedCharge.signature);
+
+    if (index !== -1) {
+      result.splice(index, 1);
+    }
+  }
+
+  return result;
+};
 const _findChargeBlockHeight = (blocks, chargeSignature) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
@@ -2286,7 +2316,7 @@ const _listen = () => {
   const app = express();
 
   app.get('/balances/:address', (req, res, next) => {
-    const {address, asset} = req.params;
+    const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalances(db, address);
     res.json({balance});
@@ -2298,15 +2328,27 @@ const _listen = () => {
     res.json({balance});
   });
   app.get('/unconfirmedBalances/:address', (req, res, next) => {
-    const {address, asset} = req.params;
+    const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getUnconfirmedUnsettledBalances(db, address);
+    const balance = _getUnconfirmedUnsettledBalances(db, mempool, address);
     res.json({balance});
   });
   app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
     const {address, asset} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getUnconfirmedUnsettledBalance(db, address, asset);
+    const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
+    res.json({balance});
+  });
+  app.get('/charges/:address', (req, res, next) => {
+    const {address} = req.params;
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const balance = _getConfirmedCharges(db, address);
+    res.json({balance});
+  });
+  app.get('/unconfirmedCharges/:address', (req, res, next) => {
+    const {address} = req.params;
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const balance = _getUnconfirmedCharges(db, mempool, address);
     res.json({balance});
   });
 
