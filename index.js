@@ -2565,6 +2565,9 @@ const _listen = () => {
       blockcount,
     });
   }); */
+  app.get('/blockcache', (req, res, next) => {
+    res.json(blocks);
+  });
   app.get('/mempool', (req, res, next) => {
     res.json(mempool);
   });
@@ -2654,14 +2657,14 @@ const _listen = () => {
           process.stdout.write('> ');
           break;
         }
-        case 'blocks': {
-          console.log(JSON.stringify(blocks, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
         case 'blockcount': {
           const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
           console.log(JSON.stringify(blockcount, null, 2));
+          process.stdout.write('> ');
+          break;
+        }
+        case 'blockcache': {
+          console.log(JSON.stringify(blocks, null, 2));
           process.stdout.write('> ');
           break;
         }
