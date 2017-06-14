@@ -2525,14 +2525,24 @@ const _listen = () => {
       const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
 
       if (height >= 1 && height <= topBlockHeight) {
-        const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
-        rs.pipe(res);
-        rs.on('error', err => {
-          console.warn(err);
+        const firstBlockHeight = blocks[0].height;
 
-          res.status(500);
-          res.send(err.stack);
-        });
+        if (height >= firstBlockHeight) {
+          const blockIndex = height - firstBlockHeight;
+          const block = blocks[blockIndex];
+          res.type('application/json');
+          res.send(JSON.stringify(block, null, 2));
+        } else {
+          const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
+          res.type('application/json');
+          rs.pipe(res);
+          rs.on('error', err => {
+            console.warn(err);
+
+            res.status(500);
+            res.send(err.stack);
+          });
+        }
       } else {
         res.status(404);
         res.json({
