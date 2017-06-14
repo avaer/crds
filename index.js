@@ -1337,7 +1337,11 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 };
 const _checkBlockExists = (blocks, mempool, block) => {
   const checkBlockIndex = block.height - 1;
-  const mainChainBlock = (checkBlockIndex < blocks.length) ? blocks[checkBlockIndex] : null;
+  const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
+  const topBlockIndex = topBlockHeight - 1;
+  const firstBlockHeight = (blocks.length > 0) ? blocks[0].height : 0;
+  const firstBlockIndex = firstBlockHeight - 1;
+  const mainChainBlock = (checkBlockIndex <= topBlockIndex) ? blocks[checkBlockIndex - firstBlockIndex] : null;
 
   if (mainChainBlock && mainChainBlock.hash === block.hash) {
     return true;
