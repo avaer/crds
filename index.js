@@ -2357,14 +2357,14 @@ const _listen = () => {
   app.get('/charges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getConfirmedCharges(db, address);
-    res.json({balance});
+    const charges = _getConfirmedCharges(db, address);
+    res.json(charges);
   });
   app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getUnconfirmedCharges(db, mempool, address);
-    res.json({balance});
+    const charges = _getUnconfirmedCharges(db, mempool, address);
+    res.json(charges);
   });
 
   const _createSend = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp, privateKey}) => {
