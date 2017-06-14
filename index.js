@@ -2499,9 +2499,9 @@ const _listen = () => {
       limit = Infinity;
     }
 
-    const blocks = blocks.slice(skip, skip + limit);
+    const blocksSlice = blocks.slice(skip, skip + limit);
     res.json({
-      blocks,
+      blocks: blocksSlice,
     });
   });
   app.get('/blockcount', (req, res, next) => {
