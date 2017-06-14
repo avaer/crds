@@ -503,8 +503,8 @@ class Peer {
           json: true,
         }, (err, res, body) => {
           if (!err) {
-            const dbs = body;
-            accept(dbs);
+            const {blocks} = body;
+            accept(blocks);
           } else {
             reject(err);
           }
@@ -549,27 +549,27 @@ class Peer {
         ]) => {
           const _addBlocks = () => {
             for (let i = 0; i < remoteBlocks.length; i++) {
-              const block = remoteBlocks[i];
-              const error = _addBlock(dbs, blocks, mempool, block);
+              const remoteBlock = Block.from(remoteBlocks[i]);
+              const error = _addBlock(dbs, blocks, mempool, remoteBlock);
               if (error) {
                 console.warn(error);
               }
             }
           };
           const _addMempool = () => {
-            const {blocks, messages} = remoteMempool;
+            const {blocks: remoteBlocks, messages: remoteMessages} = remoteMempool;
 
-            for (let i = 0; i < blocks.length; i++) {
-              const block = Block.from(blocks[i]);
-              const error = _addBlock(dbs, blocks, mempool, block);
+            for (let i = 0; i < remoteBlocks.length; i++) {
+              const remoteBlock = Block.from(remoteBlocks[i]);
+              const error = _addBlock(dbs, blocks, mempool, remoteBlock);
               if (error) {
                 console.warn(error);
               }
             }
-            for (let i = 0; i < messages.length; i++) {
-              const message = Message.from(messages[i]);
+            for (let i = 0; i < remoteMessages.length; i++) {
+              const remoteMessage = Message.from(remoteMessages[i]);
               const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-              const error = _addMessage(db, blocks, mempool, message);
+              const error = _addMessage(db, blocks, mempool, remoteMessage);
               if (error) {
                 console.warn(error);
               }
@@ -2510,6 +2510,14 @@ const _listen = () => {
     res.json({
       blockcount,
     });
+  });
+  app.get('/mempool', (req, res, next) => {
+    res.json(mempool);
+  });
+  app.get('/peers', (req, res, next) => {
+    const urls = peers.map(({url}) => url);
+
+    res.json(urls);
   });
 
   _refreshLivePeers();
