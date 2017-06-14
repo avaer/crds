@@ -2333,26 +2333,26 @@ const _listen = () => {
   app.get('/balances/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getConfirmedBalances(db, address);
-    res.json({balance});
+    const balances = _getConfirmedBalances(db, address);
+    res.json(balances);
   });
   app.get('/balance/:address/:asset', cors, (req, res, next) => {
     const {address, asset} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalance(db, address, asset);
-    res.json({balance});
+    res.json(balance);
   });
   app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getUnconfirmedUnsettledBalances(db, mempool, address);
-    res.json({balance});
+    const balances = _getUnconfirmedUnsettledBalances(db, mempool, address);
+    res.json(balances);
   });
   app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
     const {address, asset} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
-    res.json({balance});
+    res.json(balance);
   });
   app.get('/charges/:address', cors, (req, res, next) => {
     const {address} = req.params;
