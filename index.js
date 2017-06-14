@@ -522,16 +522,30 @@ class Peer {
           }
         });
       });
+      const _requestPeers = () => new Promise((accept, reject) => {
+        request(this.url + '/peers', {
+          json: true,
+        }, (err, res, body) => {
+          if (!err) {
+            const peers = body;
+            accept(peers);
+          } else {
+            reject(err);
+          }
+        });
+      });
 
       Promise.all([
         _requestBlocks({
           skip: Math.max(blocks.length - 10, 0),
         }),
         _requestMempool(),
+        _requestPeers(),
       ])
         .then(([
           remoteBlocks,
           remoteMempool,
+          remotePeers,
         ]) => {
           const _addBlocks = () => {
             for (let i = 0; i < remoteBlocks.length; i++) {
@@ -541,7 +555,6 @@ class Peer {
                 console.warn(error);
               }
             }
-            return Promise.resolve();
           };
           const _addMempool = () => {
             const {blocks, messages} = remoteMempool;
@@ -561,13 +574,17 @@ class Peer {
                 console.warn(error);
               }
             }
-            return Promise.resolve();
+          };
+          const _addPeers = () => {
+            for (let i = 0; i < remotePeers.length; i++) {
+              const url = remotePeers[i];
+              _addPeer(url);
+            }
           };
 
-          return Promise.all([
-            _addBlocks(),
-            _addMempool(),
-          ]);
+          _addBlocks();
+          _addMempool();
+          _addPeers();
         })
         .catch(err => {
           console.warn(err);
