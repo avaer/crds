@@ -2101,11 +2101,10 @@ const _saveState = (() => {
 
             const keepDbFiles = [];
             const zerothDbLocalBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
-            for (let i = 0; i < blocks.length; i++) {
-              if (i >= zerothDbLocalBlockIndex) {
-                const height = i + 1;
-                keepDbFiles.push(`db-${height}.json`);
-              }
+            for (let i = zerothDbLocalBlockIndex; i < blocks.length; i++) {
+              const block = blocks[i];
+              const {height} = block;
+              keepDbFiles.push(`db-${height}.json`);
             }
 
             const promises = [];
