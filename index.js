@@ -2242,7 +2242,7 @@ const _refreshLivePeers = () => {
   const disabledPeers = peers.filter(peer => !peer.isEnabled());
 
   while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
-    const disabledPeerIndex = Math.floor(disabledPeers * Math.random());
+    const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
     const peer = disabledPeers[disabledPeerIndex];
     peer.enable();
 
