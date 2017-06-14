@@ -52,7 +52,10 @@ const _findArg = name => {
   }
   return null;
 };
+const protocol = parseInt(_findArg('protocol')) || 'http';
+const host = parseInt(_findArg('host')) || '127.0.0.1';
 const port = parseInt(_findArg('port')) || 9999;
+const localUrl = `${protocol}://${host}:${port}`;
 const dataDirectory = _findArg('dataDirectory') || 'data';
 
 class Block {
@@ -439,7 +442,7 @@ class Peer {
                 const block = Block.from(blockJson);
                 const error = _addBlock(dbs, blocks, mempool, block);
                 if (error) {
-                  console.warn('add remote block error:', err);
+                  console.warn('add remote block error:', error);
                 }
                 break;
               }
@@ -473,7 +476,7 @@ class Peer {
           });
         });
         c.on('error', err => {
-          console.warn(err);
+          // console.warn(err);
 
           this._connection = null;
 
@@ -591,7 +594,7 @@ class Peer {
           _addPeers();
         })
         .catch(err => {
-          console.warn(err);
+          // console.warn(err);
         });
 
       this._redownloadInterval = setInterval(() => {
@@ -2220,10 +2223,10 @@ const _savePeers = (() => {
 
 const _addPeer = url => {
   const peer = new Peer(url);
-  if (!peers.some(p => p.equals(peer))) {
+  if (peer.url !== localUrl && !peers.some(p => p.equals(peer))) {
     peers.push(peer);
 
-    api.emit('peer', peer);
+    api.emit('peer', peer.url);
 
     _refreshLivePeers();
 
@@ -2552,7 +2555,7 @@ const _listen = () => {
       wss.emit('connection', c);
     });
   });
-  server.listen(port);
+  server.listen(port, host);
 
   api.on('block', block => {
     const e = {
@@ -2760,7 +2763,9 @@ const _listen = () => {
           break;
         }
         case 'peers': {
-          console.log(peers.map(({url}) => url).join('\n'));
+          if (peers.length > 0) {
+            console.log(peers.map(({url}) => url).join('\n'));
+          }
           process.stdout.write('> ');
 
           break;
