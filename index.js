@@ -117,13 +117,13 @@ class Block {
     const _checkHash = () => this.getHash() === this.hash;
     const _checkDifficulty = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
     const _checkPrevHash = () => {
-      if (blocks.length > 0) {
-        return this.prevHash === blocks[blocks.length - 1].hash;
-      } else {
-        return this.prevHash === zeroHash;
-      }
+      const prevBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
+      return this.prevHash === prevBlockHash;
     };
-    const _checkHeight = () => this.height === (blocks.length + 1);
+    const _checkHeight = () => {
+      const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      return this.height === nextBlockHeight;
+    };
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
         const message = this.messages[i];
@@ -188,7 +188,7 @@ class Message {
       const payloadJson = JSON.parse(payload);
       const {startHeight} = payloadJson;
       const endHeight = startHeight + MESSAGE_TTL;
-      const nextHeight = blocks.length + 1;
+      const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
       if (nextHeight >= startHeight && nextHeight < endHeight) {
         if (!db.messageRevocations.some(signatures => signatures.includes(signature))) {
@@ -543,9 +543,10 @@ class Peer {
           });
         });
 
+        const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
         Promise.all([
           _requestBlocks({
-            skip: Math.max(blocks.length - 10, 0),
+            skip: Math.max(topBlockHeight - UNDO_HEIGHT, 0),
           }),
           _requestMempool(),
           _requestPeers(),
@@ -973,14 +974,14 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _findChargeBlockIndex = (blocks, chargeSignature) => {
+const _findChargeBlockHeight = (blocks, chargeSignature) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
     const chargeMessage = _findLocalChargeMessage(messages, chargeSignature);
 
     if (chargeMessage) {
-      return i;
+      return block.height;
     }
   }
   return -1;
@@ -1294,8 +1295,8 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
   return minter;
 };
 const _checkBlockExists = (blocks, mempool, block) => {
-  const blockIndex = block.height - 1;
-  const mainChainBlock = (blockIndex < blocks.length) ? blocks[blockIndex] : null;
+  const checkBlockIndex = block.height - 1;
+  const mainChainBlock = (checkBlockIndex < blocks.length) ? blocks[checkBlockIndex] : null;
 
   if (mainChainBlock && mainChainBlock.hash === block.hash) {
     return true;
@@ -1306,11 +1307,13 @@ const _checkBlockExists = (blocks, mempool, block) => {
 const _findBlockAttachPoint = (blocks, mempool, block) => {
   const {prevHash, height} = block;
   const blockIndex = height - 1;
+  const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
+  const topBlockIndex = topBlockHeight - 1;
 
-  if ((blockIndex >= Math.max(blocks.length - UNDO_HEIGHT, 0)) && (blockIndex <= blocks.length)) {
+  if ((blockIndex >= Math.max(topBlockIndex - UNDO_HEIGHT, 0)) && (blockIndex <= (topBlockIndex + 1))) {
     const candidateTopMainChainBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
 
-    if (blockIndex === blocks.length && candidateTopMainChainBlockHash === prevHash) {
+    if (blockIndex === (topBlockIndex + 1) && candidateTopMainChainBlockHash === prevHash) {
       return { // valid on main chain
         type: 'mainChain',
       };
@@ -1346,7 +1349,7 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
       }
     }
   } else {
-    if ((height - 1) < (blocks.length - UNDO_HEIGHT)) {
+    if (blockIndex < Math.max((topBlockIndex - UNDO_HEIGHT), 0)) {
       return {
         type: 'outOfRange',
         direction: -1,
@@ -1362,9 +1365,11 @@ const _findBlockAttachPoint = (blocks, mempool, block) => {
 const _getBlockForkOrigin = (blocks, mempool, block) => {
   const _getPreviousMainChainBlock = block => {
     const {prevHash, height} = block;
+    const blockIndex = height - 1;
+    const previousBlockIndex = blockIndex - 1;
 
-    if (((height - 1) >= 0) && ((height - 1) < blocks.length)) {
-      const candidateMainChainBlock = blocks[height - 1];
+    if ((previousBlockIndex >= 0) && (previousBlockIndex < blocks.length)) {
+      const candidateMainChainBlock = blocks[previousBlockIndex];
 
       if (candidateMainChainBlock.hash === prevHash) {
         return candidateMainChainBlock;
@@ -1538,13 +1543,14 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
 
   // settle charges
   const oldCharges = newDb.charges.slice();
+  const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
   for (let i = 0; i < oldCharges.length; i++) {
     const charge = oldCharges[i];
     const chargePayload = JSON.parse(charge.payload);
     const {signature} = chargePayload;
-    const chargeBlockIndex = _findChargeBlockIndex(blocks, signature);
+    const chargeBlockHeight = _findChargeBlockHeight(blocks, signature);
 
-    if (chargeBlockIndex !== -1 && ((newDb.blocks.length + 1) - chargeBlockIndex) >= CHARGE_SETTLE_BLOCKS) {
+    if (chargeBlockHeight !== -1 && (nextBlockHeight - chargeBlockHeight) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
 
       let srcAddressEntry = newDb.balances[srcAddress];
@@ -1620,10 +1626,12 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     return result;
   };
   const forkedBlockIndex = forkedBlockHeight - 1;
-  const numSlicedBlocks = blocks.length - (forkedBlockIndex + 1);
+  const topBlockIndex = blocks.length - 1;
+  const numSlicedBlocks = topBlockIndex - forkedBlockIndex;
   const slicedBlocks = blocks.slice(-numSlicedBlocks);
   const slicedMessages = _getBlocksMessages(slicedBlocks);
-  const numAddedSideChainBlocks = sidechainBlocks.length - (forkedBlockIndex + 1);
+  const topSideChainBlockIndex = sidechainBlocks.length - 1;
+  const numAddedSideChainBlocks = topSideChainBlockIndex - forkedBlockIndex;
   const addedSideChainBlocks = sideChainBlocks.slice(-numAddedSideChainBlocks);
   const addedSideChainMessages = _getBlocksMessages(addedSideChainBlocks);
 
@@ -1787,7 +1795,8 @@ const doHash = () => new Promise((accept, reject) => {
   const version = BLOCK_VERSION;
   const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
-  const height = blocks.length + 1;
+  const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+  const height = topBlockHeight + 1;
   const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: minePublicKey, startHeight: height, timestamp: Date.now()});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
   const privateKeyBuffer = COINBASE_PRIVATE_KEY;
@@ -2009,7 +2018,7 @@ const _ensureDataPaths = () => {
   });
   return Promise.all(dataDirectories.map(p => _ensureDirectory(p)));
 };
-const _saveState = (() => {
+const _saveState = (() => { // XXX rewrite this to save blocks to the right height
   const _doSave = cb => {
     const _writeNewFiles = () => {
       const promises = [];
@@ -2022,7 +2031,7 @@ const _saveState = (() => {
           }
         });
       });
-      const zerothDbBlockIndex = Math.max(blocks.length - 10, 0);
+      const zerothDbBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
@@ -2044,7 +2053,7 @@ const _saveState = (() => {
             dbFiles = dbFiles || [];
 
             const keepDbFiles = [];
-            const zerothDbBlockIndex = Math.max(blocks.length - 10, 0);
+            const zerothDbBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
             for (let i = 0; i < blocks.length; i++) {
               const dbIndex = i - zerothDbBlockIndex;
 
@@ -2085,8 +2094,6 @@ const _saveState = (() => {
           if (!err || err.code === 'ENOENT') {
             blockFiles = blockFiles || [];
 
-            const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-
             const promises = [];
             const _removeFile = p => new Promise((accept, reject) => {
               fs.unlink(p, err => {
@@ -2097,6 +2104,7 @@ const _saveState = (() => {
                 }
               });
             });
+            const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
             for (let i = 0; i < blockFiles.length; i++) {
               const blockFile = blockFiles[i];
               const match = blockFile.match(/^block-([0-9]+)\.json$/);
@@ -2516,13 +2524,13 @@ const _listen = () => {
       blocks: blocksSlice,
     });
   });
-  app.get('/blockcount', (req, res, next) => {
-    const blockcount = blocks.length;
+  /* app.get('/blockcount', (req, res, next) => {
+    const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
 
     res.json({
       blockcount,
     });
-  });
+  }); */
   app.get('/mempool', (req, res, next) => {
     res.json(mempool);
   });
@@ -2618,7 +2626,8 @@ const _listen = () => {
           break;
         }
         case 'blockcount': {
-          console.log(JSON.stringify(blocks.length, null, 2));
+          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+          console.log(JSON.stringify(blockcount, null, 2));
           process.stdout.write('> ');
           break;
         }
@@ -2639,18 +2648,21 @@ const _listen = () => {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             const balance = _getUnconfirmedBalance(db, mempool, address, asset);
             console.log(JSON.stringify(balance, null, 2));
-            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
+            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ')
           } else if (address) {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             const balances = _getUnconfirmedBalances(db, mempool, address);
             console.log(JSON.stringify(balances, null, 2));
-            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
+            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ');
           } else {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
-            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
+            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ');
           }
 
