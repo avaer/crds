@@ -435,7 +435,8 @@ class Peer {
 
             switch (type) {
               case 'block': {
-                const {block} = m;
+                const {block: blockJson} = m;
+                const block = Block.from(blockJson);
                 const error = _addBlock(dbs, blocks, mempool, block);
                 if (error) {
                   console.warn('add remote block error:', err);
@@ -443,7 +444,8 @@ class Peer {
                 break;
               }
               case 'message': {
-                const {message} = m;
+                const {message: messgeJson} = m;
+                const message = Message.from(messgeJson);
                 const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
                 const error = _addMessage(db, blocks, mempool, message);
                 if (error) {
@@ -489,6 +491,8 @@ class Peer {
           _recurse();
         }, 1000);
       };
+
+      _recurse();
     };
     const _download = () => {
       const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
