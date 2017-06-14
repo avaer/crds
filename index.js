@@ -2528,8 +2528,10 @@ const _listen = () => {
         const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
         rs.pipe(res);
         rs.on('error', err => {
+          console.warn(err);
+
           res.status(500);
-          res.send(error.stack);
+          res.send(err.stack);
         });
       } else {
         res.status(404);
