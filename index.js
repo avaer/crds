@@ -451,6 +451,11 @@ class Peer {
                 }
                 break;
               }
+              case 'peer': {
+                const {peer} = m;
+                _addPeer(peer);
+                break;
+              }
               default: {
                 console.warn('unknown message type:', msg);
                 break;
@@ -2191,6 +2196,30 @@ const _savePeers = (() => {
   return _recurse;
 })();
 
+const _addPeer = url => {
+  const peer = new Peer(url);
+  if (!peers.some(p => p.equals(peer))) {
+    peers.push(peer);
+
+    api.emit('peer', peer);
+
+    _refreshLivePeers();
+
+    _savePeers();
+  }
+};
+const _removePeer = url => {
+  const index = peers.findIndex(peer => peer.url === url);
+  if (index !== -1) {
+    const peer = peers[index];
+    peer.disable();
+    peers.splice(index, 1);
+
+    _refreshLivePeers();
+
+    _savePeers();
+  }
+};
 const _refreshLivePeers = () => {
   const enabledPeers = peers.filter(peer => peer.isEnabled());
   const disabledPeers = peers.filter(peer => !peer.isEnabled());
@@ -2519,6 +2548,18 @@ const _listen = () => {
       connection.send(es);
     }
   });
+  api.on('peer', peer => {
+    const e = {
+      type: 'peer',
+      peer: peer,
+    };
+    const es = JSON.stringify(e);
+
+    for (let i = 0; i < connections.length; i++) {
+      const connection = connections[i];
+      connection.send(es);
+    }
+  });
 
   const r = repl.start({
     prompt: '> ',
@@ -2696,29 +2737,15 @@ const _listen = () => {
         }
         case 'addpeer': {
           const [, url] = split;
-          const peer = new Peer(url);
-          if (!peers.some(p => p.equals(peer))) {
-            peers.push(peer);
 
-            _refreshLivePeers();
-
-            _savePeers();
-          }
+          _addPeer(url);
 
           break;
         }
         case 'removepeer': {
           const [, url] = split;
-          const index = peers.findIndex(peer => peer.url === url);
-          if (index !== -1) {
-            const peer = peers[index];
-            peer.disable();
-            peers.splice(index, 1);
 
-            _refreshLivePeers();
-
-            _savePeers();
-          }
+          _removePeer(url);
 
           break;
         }
