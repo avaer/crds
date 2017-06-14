@@ -499,24 +499,33 @@ class Peer {
     };
     const _download = () => {
       const _recurse = () => {
-        const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
-          const q = {};
-          if (skip !== undefined) {
-            q.skip = skip;
-          }
-          if (limit !== undefined) {
-            q.limit = limit;
-          }
-          request(this.url + '/blocks?' + querystring.stringify(q), {
-            json: true,
-          }, (err, res, body) => {
-            if (!err) {
-              const {blocks} = body;
-              accept(blocks);
-            } else {
-              reject(err);
-            }
-          });
+        const _requestBlocks = ({startHeight}) => new Promise((accept, reject) => {
+          const result = [];
+
+          const _recurse = height => {
+            request(this.url + '/blocks/' + height, {
+              json: true,
+            }, (err, res, body) => {
+              if (!err) {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  const block = body;
+                  result.push(block);
+
+                  _recurse(height + 1);
+                } else if (res.statusCode === 404) {
+                  accept(result);
+                } else {
+                  reject({
+                    status: res.statusCode,
+                    error: 'invalid status code',
+                  });
+                }
+              } else {
+                reject(err);
+              }
+            });
+          };
+          _recurse(startHeight);
         });
         const _requestMempool = () => new Promise((accept, reject) => {
           request(this.url + '/mempool', {
@@ -546,7 +555,7 @@ class Peer {
         const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
         Promise.all([
           _requestBlocks({
-            skip: Math.max(topBlockHeight - UNDO_HEIGHT, 0),
+            startHeight: Math.max(topBlockHeight - CHARGE_SETTLE_BLOCKS, 1),
           }),
           _requestMempool(),
           _requestPeers(),
@@ -2504,21 +2513,32 @@ const _listen = () => {
     }
   });
 
-  app.get('/blocks', (req, res, next) => {
-    const {skip: skipString, limit: limitString} = req.query;
-    let skip = parseInt(skipString, 10);
-    if (isNaN(skip)) {
-      skip = 0;
-    }
-    let limit = parseInt(limitString, 10);
-    if (isNaN(limit)) {
-      limit = Infinity;
-    }
+  app.get('/block/:height', (req, res, next) => {
+    const {height: heightStirng} = req.params;
+    const height = parseInt(heightStirng, 10);
 
-    const blocksSlice = blocks.slice(skip, skip + limit);
-    res.json({
-      blocks: blocksSlice,
-    });
+    if (!isNaN(height)) {
+      const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+
+      if (height >= 1 && height <= topBlockHeight) {
+        const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
+        rs.pipe(res);
+        rs.on('error', err => {
+          res.status(500);
+          res.send(error.stack);
+        });
+      } else {
+        res.status(404);
+        res.json({
+          error: 'height out of range',
+        });
+      }
+    } else {
+      res.status(400);
+      res.json({
+        error: 'invalid height',
+      });
+    }
   });
   /* app.get('/blockcount', (req, res, next) => {
     const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
