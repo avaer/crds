@@ -551,8 +551,8 @@ class Peer {
             for (let i = 0; i < remoteBlocks.length; i++) {
               const remoteBlock = Block.from(remoteBlocks[i]);
               const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-              if (error) {
-                console.warn(error);
+              if (error && !error.soft) {
+                console.warn('add remote block error:', error);
               }
             }
           };
@@ -562,8 +562,8 @@ class Peer {
             for (let i = 0; i < remoteBlocks.length; i++) {
               const remoteBlock = Block.from(remoteBlocks[i]);
               const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-              if (error) {
-                console.warn(error);
+              if (error && !error.soft) {
+                console.warn('add remote block error:', error);
               }
             }
             for (let i = 0; i < remoteMessages.length; i++) {
@@ -571,7 +571,7 @@ class Peer {
               const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
               const error = _addMessage(db, blocks, mempool, remoteMessage);
               if (error) {
-                console.warn(error);
+                console.warn('add remote message error:', error);
               }
             }
           };
@@ -1754,6 +1754,7 @@ const _addBlock = (dbs, blocks, mempool, block) => {
     return {
       status: 400,
       error: 'block exists',
+      soft: true,
     };
   }
 };
