@@ -498,110 +498,114 @@ class Peer {
       _recurse();
     };
     const _download = () => {
-      const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
-        const q = {};
-        if (skip !== undefined) {
-          q.skip = skip;
-        }
-        if (limit !== undefined) {
-          q.limit = limit;
-        }
-        request(this.url + '/blocks?' + querystring.stringify(q), {
-          json: true,
-        }, (err, res, body) => {
-          if (!err) {
-            const {blocks} = body;
-            accept(blocks);
-          } else {
-            reject(err);
+      const _recurse = () => {
+        const _requestBlocks = ({skip, limit}) => new Promise((accept, reject) => {
+          const q = {};
+          if (skip !== undefined) {
+            q.skip = skip;
           }
-        });
-      });
-      const _requestMempool = () => new Promise((accept, reject) => {
-        request(this.url + '/mempool', {
-          json: true,
-        }, (err, res, body) => {
-          if (!err) {
-            const mempool = body;
-            accept(mempool);
-          } else {
-            reject(err);
+          if (limit !== undefined) {
+            q.limit = limit;
           }
+          request(this.url + '/blocks?' + querystring.stringify(q), {
+            json: true,
+          }, (err, res, body) => {
+            if (!err) {
+              const {blocks} = body;
+              accept(blocks);
+            } else {
+              reject(err);
+            }
+          });
         });
-      });
-      const _requestPeers = () => new Promise((accept, reject) => {
-        request(this.url + '/peers', {
-          json: true,
-        }, (err, res, body) => {
-          if (!err) {
-            const peers = body;
-            accept(peers);
-          } else {
-            reject(err);
-          }
+        const _requestMempool = () => new Promise((accept, reject) => {
+          request(this.url + '/mempool', {
+            json: true,
+          }, (err, res, body) => {
+            if (!err) {
+              const mempool = body;
+              accept(mempool);
+            } else {
+              reject(err);
+            }
+          });
         });
-      });
-
-      Promise.all([
-        _requestBlocks({
-          skip: Math.max(blocks.length - 10, 0),
-        }),
-        _requestMempool(),
-        _requestPeers(),
-      ])
-        .then(([
-          remoteBlocks,
-          remoteMempool,
-          remotePeers,
-        ]) => {
-          const _addBlocks = () => {
-            for (let i = 0; i < remoteBlocks.length; i++) {
-              const remoteBlock = Block.from(remoteBlocks[i]);
-              const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-              if (error && !error.soft) {
-                console.warn('add remote block error:', error);
-              }
+        const _requestPeers = () => new Promise((accept, reject) => {
+          request(this.url + '/peers', {
+            json: true,
+          }, (err, res, body) => {
+            if (!err) {
+              const peers = body;
+              accept(peers);
+            } else {
+              reject(err);
             }
-          };
-          const _addMempool = () => {
-            const {blocks: remoteBlocks, messages: remoteMessages} = remoteMempool;
-
-            for (let i = 0; i < remoteBlocks.length; i++) {
-              const remoteBlock = Block.from(remoteBlocks[i]);
-              const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-              if (error && !error.soft) {
-                console.warn('add remote block error:', error);
-              }
-            }
-            for (let i = 0; i < remoteMessages.length; i++) {
-              const remoteMessage = Message.from(remoteMessages[i]);
-              const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-              const error = _addMessage(db, blocks, mempool, remoteMessage);
-              if (error && !error.soft) {
-                console.warn('add remote message error:', error);
-              }
-            }
-          };
-          const _addPeers = () => {
-            for (let i = 0; i < remotePeers.length; i++) {
-              const url = remotePeers[i];
-              _addPeer(url);
-            }
-          };
-
-          _addBlocks();
-          _addMempool();
-          _addPeers();
-        })
-        .catch(err => {
-          // console.warn(err);
+          });
         });
+
+        Promise.all([
+          _requestBlocks({
+            skip: Math.max(blocks.length - 10, 0),
+          }),
+          _requestMempool(),
+          _requestPeers(),
+        ])
+          .then(([
+            remoteBlocks,
+            remoteMempool,
+            remotePeers,
+          ]) => {
+            const _addBlocks = () => {
+              for (let i = 0; i < remoteBlocks.length; i++) {
+                const remoteBlock = Block.from(remoteBlocks[i]);
+                const error = _addBlock(dbs, blocks, mempool, remoteBlock);
+                if (error && !error.soft) {
+                  console.warn('add remote block error:', error);
+                }
+              }
+            };
+            const _addMempool = () => {
+              const {blocks: remoteBlocks, messages: remoteMessages} = remoteMempool;
+
+              for (let i = 0; i < remoteBlocks.length; i++) {
+                const remoteBlock = Block.from(remoteBlocks[i]);
+                const error = _addBlock(dbs, blocks, mempool, remoteBlock);
+                if (error && !error.soft) {
+                  console.warn('add remote block error:', error);
+                }
+              }
+              for (let i = 0; i < remoteMessages.length; i++) {
+                const remoteMessage = Message.from(remoteMessages[i]);
+                const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+                const error = _addMessage(db, blocks, mempool, remoteMessage);
+                if (error && !error.soft) {
+                  console.warn('add remote message error:', error);
+                }
+              }
+            };
+            const _addPeers = () => {
+              for (let i = 0; i < remotePeers.length; i++) {
+                const url = remotePeers[i];
+                _addPeer(url);
+              }
+            };
+
+            _addBlocks();
+            _addMempool();
+            _addPeers();
+          })
+          .catch(err => {
+            // console.warn(err);
+          });
+      };
 
       this._redownloadInterval = setInterval(() => {
         this._redownloadInterval = null;
 
-        _download();
+        _recurse();
       }, 30 * 1000);
+
+      _recurse();
     };
 
     _listen();
