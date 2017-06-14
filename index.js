@@ -1952,9 +1952,14 @@ const _loadState = () => {
           });
           return Promise.all(candidateHeights.map(height => _readDbFile(height)));
         };
-        const _readBlockFiles = () => new Promise((accept, reject) => {
-          const blocks = [];
-
+        const _readBlockFiles = () => {
+          const candidateHeights = (() => {
+            const result = [];
+            for (let i = 1; i <= bestBlockHeight; i++) {
+              result.push(i);
+            }
+            return result;
+          })();
           const _readBlockFile = height => new Promise((accept, reject) => {
             fs.readFile(path.join(blocksDataPath, `block-${height}.json`), 'utf8', (err, s) => {
               if (!err) {
@@ -1965,21 +1970,8 @@ const _loadState = () => {
               }
             });
           });
-          const _recurse = height => {
-            if (height <= bestBlockHeight) {
-              _readBlockFile(height)
-                .then(block => {
-                  blocks.push(block);
-
-                  _recurse(height + 1);
-                })
-                .catch(reject);
-            } else {
-              accept(blocks);
-            }
-          };
-          _recurse(1);
-        });
+          return Promise.all(candidateHeights.map(height => _readBlockFile(height)));
+        };
 
         return Promise.all([
           _readDbFiles(),
