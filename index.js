@@ -441,7 +441,7 @@ class Peer {
                 const {block: blockJson} = m;
                 const block = Block.from(blockJson);
                 const error = _addBlock(dbs, blocks, mempool, block);
-                if (error) {
+                if (error && !error.soft) {
                   console.warn('add remote block error:', error);
                 }
                 break;
@@ -451,8 +451,8 @@ class Peer {
                 const message = Message.from(messgeJson);
                 const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
                 const error = _addMessage(db, blocks, mempool, message);
-                if (error) {
-                  console.warn('add remote message error:', err);
+                if (error && !error.soft) {
+                  console.warn('add remote message error:', error);
                 }
                 break;
               }
@@ -577,7 +577,7 @@ class Peer {
               const remoteMessage = Message.from(remoteMessages[i]);
               const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
               const error = _addMessage(db, blocks, mempool, remoteMessage);
-              if (error) {
+              if (error && !error.soft) {
                 console.warn('add remote message error:', error);
               }
             }
@@ -1770,9 +1770,9 @@ const _addMessage = (db, blocks, mempool, message) => {
   if (!error) {
     if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
       mempool.messages.push(message);
-    }
 
-    api.emit('message', message);
+      api.emit('message', message);
+    }
   }
   return error;
 };
@@ -2635,15 +2635,18 @@ const _listen = () => {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             const balance = _getUnconfirmedBalance(db, mempool, address, asset);
             console.log(JSON.stringify(balance, null, 2));
+            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ')
           } else if (address) {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             const balances = _getUnconfirmedBalances(db, mempool, address);
             console.log(JSON.stringify(balances, null, 2));
+            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ');
           } else {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
+            console.log(`Blocks: ${blocks.length} Mempool: ${mempool.messages.length}`);
             process.stdout.write('> ');
           }
 
@@ -2774,6 +2777,7 @@ const _listen = () => {
           const [, url] = split;
 
           _addPeer(url);
+          process.stdout.write('> ');
 
           break;
         }
@@ -2781,6 +2785,7 @@ const _listen = () => {
           const [, url] = split;
 
           _removePeer(url);
+          process.stdout.write('> ');
 
           break;
         }
