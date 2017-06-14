@@ -1795,15 +1795,17 @@ const _addBlock = (dbs, blocks, mempool, block) => {
   }
 };
 const _addMessage = (db, blocks, mempool, message) => {
-  const error = message.verify(db, blocks, mempool);
-  if (!error) {
-    if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
+  if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
+    const error = message.verify(db, blocks, mempool);
+    if (!error) {
       mempool.messages.push(message);
 
       api.emit('message', message);
     }
+    return error;
+  } else {
+    return null;
   }
-  return error;
 };
 
 let lastBlockTime = Date.now();
