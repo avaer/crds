@@ -1704,6 +1704,9 @@ const _addBlock = (dbs, blocks, mempool, block) => {
             dbs.shift();
           }
           blocks.push(block);
+          while (block.length > CHARGE_SETTLE_BLOCKS) {
+            block.shift();
+          }
           mempool.blocks = newMempool.blocks;
           mempool.messages = newMempool.messages;
 
@@ -1727,6 +1730,9 @@ const _addBlock = (dbs, blocks, mempool, block) => {
             dbs.shift();
           }
           blocks = newBlocks;
+          while (block.length > CHARGE_SETTLE_BLOCKS) {
+            block.shift();
+          }
           mempool.blocks = newMempool.blocks;
           mempool.messages = newMempool.messages;
 
@@ -2018,7 +2024,7 @@ const _ensureDataPaths = () => {
   });
   return Promise.all(dataDirectories.map(p => _ensureDirectory(p)));
 };
-const _saveState = (() => { // XXX rewrite this to save blocks to the right height
+const _saveState = (() => {
   const _doSave = cb => {
     const _writeNewFiles = () => {
       const promises = [];
@@ -2031,14 +2037,14 @@ const _saveState = (() => { // XXX rewrite this to save blocks to the right heig
           }
         });
       });
-      const zerothDbBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
+      const zerothDbLocalBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const {height} = block;
         promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
 
-        const dbIndex = i - zerothDbBlockIndex;
-        if (dbIndex >= 0) {
+        if (i >= zerothDbLocalBlockIndex) {
+          const dbIndex = i - zerothDbLocalBlockIndex;
           const db = dbs[dbIndex];
           promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
         }
@@ -2053,11 +2059,9 @@ const _saveState = (() => { // XXX rewrite this to save blocks to the right heig
             dbFiles = dbFiles || [];
 
             const keepDbFiles = [];
-            const zerothDbBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
+            const zerothDbLocalBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
             for (let i = 0; i < blocks.length; i++) {
-              const dbIndex = i - zerothDbBlockIndex;
-
-              if (dbIndex >= 0) {
+              if (i >= zerothDbLocalBlockIndex) {
                 const height = i + 1;
                 keepDbFiles.push(`db-${height}.json`);
               }
