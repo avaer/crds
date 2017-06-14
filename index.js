@@ -1762,11 +1762,13 @@ const _addBlock = (dbs, blocks, mempool, block) => {
           return {
             status: 400,
             error: 'stale block',
+            soft: true,
           };
         } else {
           return {
             status: 400,
             error: 'desynchronized block',
+            soft: true,
           };
         }
       } else if (type === 'dangling') {
