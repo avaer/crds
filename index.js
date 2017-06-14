@@ -391,6 +391,7 @@ class Message {
           return {
             status: 400,
             error: 'replay detected',
+            soft: true,
           };
         }
       } else {
