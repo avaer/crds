@@ -1970,7 +1970,7 @@ const _loadState = () => {
         const _readBlockFiles = () => {
           const candidateHeights = (() => {
             const result = [];
-            for (let i = 1; i <= bestBlockHeight; i++) {
+            for (let i = Math.max(bestBlockHeight - CHARGE_SETTLE_BLOCKS, 1); i <= bestBlockHeight; i++) {
               result.push(i);
             }
             return result;
