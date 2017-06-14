@@ -2315,37 +2315,48 @@ const _refreshLivePeers = () => {
 const _listen = () => {
   const app = express();
 
-  app.get('/balances/:address', (req, res, next) => {
+  const cors = (req, res, next) => {
+    res.set('Access-Control-Allow-Origin', req.get('Origin'));
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Credentials', true);
+
+    next();
+  };
+  app.options('*', cors, (req, res, next) => {
+    res.send();
+  });
+
+  app.get('/balances/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalances(db, address);
     res.json({balance});
   });
-  app.get('/balance/:address/:asset', (req, res, next) => {
+  app.get('/balance/:address/:asset', cors, (req, res, next) => {
     const {address, asset} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedBalance(db, address, asset);
     res.json({balance});
   });
-  app.get('/unconfirmedBalances/:address', (req, res, next) => {
+  app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedUnsettledBalances(db, mempool, address);
     res.json({balance});
   });
-  app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
+  app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
     const {address, asset} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
     res.json({balance});
   });
-  app.get('/charges/:address', (req, res, next) => {
+  app.get('/charges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getConfirmedCharges(db, address);
     res.json({balance});
   });
-  app.get('/unconfirmedCharges/:address', (req, res, next) => {
+  app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const balance = _getUnconfirmedCharges(db, mempool, address);
@@ -2368,7 +2379,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createSend', bodyParserJson, (req, res, next) => {
+  app.post('/createSend', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
@@ -2412,7 +2423,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMinter', bodyParserJson, (req, res, next) => {
+  app.post('/createMinter', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
@@ -2454,7 +2465,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMint', bodyParserJson, (req, res, next) => {
+  app.post('/createMint', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
@@ -2493,7 +2504,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createCharge', bodyParserJson, (req, res, next) => {
+  app.post('/createCharge', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
@@ -2535,7 +2546,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createChargeback', bodyParserJson, (req, res, next) => {
+  app.post('/createChargeback', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
@@ -2561,7 +2572,7 @@ const _listen = () => {
     }
   });
 
-  app.get('/blocks/:height', (req, res, next) => {
+  app.get('/blocks/:height', cors, (req, res, next) => {
     const {height: heightStirng} = req.params;
     const height = parseInt(heightStirng, 10);
 
@@ -2600,20 +2611,20 @@ const _listen = () => {
       });
     }
   });
-  /* app.get('/blockcount', (req, res, next) => {
+  /* app.get('/blockcount', cors, (req, res, next) => {
     const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
 
     res.json({
       blockcount,
     });
   }); */
-  app.get('/blockcache', (req, res, next) => {
+  app.get('/blockcache', cors, (req, res, next) => {
     res.json(blocks);
   });
-  app.get('/mempool', (req, res, next) => {
+  app.get('/mempool', cors, (req, res, next) => {
     res.json(mempool);
   });
-  app.get('/peers', (req, res, next) => {
+  app.get('/peers', cors, (req, res, next) => {
     const urls = peers.map(({url}) => url);
 
     res.json(urls);
