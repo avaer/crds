@@ -2780,7 +2780,8 @@ const _listen = () => {
         case 'send': {
           const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
           const quantityNumber = parseFloat(quantityString);
-          const startHeight = blocks.length + 1;
+          const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
+          const startHeight = topBlockHeight + 1;
           const timestamp = Date.now();
 
           _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
