@@ -713,6 +713,20 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         dstAssetEntry = 0;
       }
       dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
+    } else if (type === 'mint') {
+      const {address, asset, quantity} = payloadJson;
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry = _roundToCents(assetEntry + quantity);
+      addressEntry[asset] = assetEntry;
     } else if (type === 'minter') {
       const {address, asset} = payloadJson;
       const mintAsset = asset + ':mint';
@@ -726,7 +740,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (mintAssetEntry === undefined) {
         mintAssetEntry = 0;
       }
-      mintAssetEntry += 1;
+      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
       addressEntry[mintAsset] = mintAssetEntry;
     }
   }
@@ -769,6 +783,17 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         }
         result[asset] = _roundToCents(dstAssetEntry + quantity);
       }
+    } else if (type === 'mint') {
+      const {address: localAddress, asset, quantity} = payloadJson;
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        assetEntry = _roundToCents(assetEntry + quantity);
+        result[asset] = assetEntry;
+      }
     } else if (type === 'minter') {
       const {address: localAddress, asset} = payloadJson;
 
@@ -779,7 +804,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (mintAssetEntry === undefined) {
           mintAssetEntry = 0;
         }
-        mintAssetEntry += 1;
+        mintAssetEntry = _roundToCents(mintAssetEntry + 1);
         result[mintAsset] = mintAssetEntry;
       }
     }
@@ -813,11 +838,17 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'mint') {
-      const {address: mintAddress, asset} = payloadJson;
-      const mintAsset = asset + ':mint';
+      const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
-      if (mintAsset === asset && mintAddress === address) {
-        result += 1;
+      if (localAddress === address && localAsset === asset) {
+        result = _roundToCents(result + quantity);
+      }
+    } else if (type === 'minter') {
+      const {address: localAddress, asset: localAsset} = payloadJson;
+      const mintAsset = localAsset + ':mint';
+
+      if (localAddress === address && mintAsset === asset) {
+        result = _roundToCents(result + 1);
       }
     }
   }
@@ -849,7 +880,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = db.balances[srcAddress];
-      if (srcAddressEntry === undefined){
+      if (srcAddressEntry === undefined) {
         srcAddressEntry = {};
         result[srcAddress] = srcAddressEntry;
       }
@@ -860,7 +891,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
 
       let dstAddressEntry = db.balances[dstAddress];
-      if (dstAddressEntry === undefined){
+      if (dstAddressEntry === undefined) {
         dstAddressEntry = {};
         result[dstAddress] = dstAddressEntry;
       }
@@ -869,6 +900,19 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         dstAssetEntry = 0;
       }
       dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
+    } else if (type === 'mint') {
+      const {address, asset, quantity} = payloadJson;
+
+      let addressEntry = db.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      addressEntry[asset] = _roundToCents(assetEntry + quantity);
     } else if (type === 'minter') {
       const {address, asset} = payloadJson;
       const mintAsset = asset + ':mint';
@@ -882,7 +926,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       if (mintAssetEntry === undefined) {
         mintAssetEntry = 0;
       }
-      mintAssetEntry += 1;
+      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
       addressEntry[mintAsset] = mintAssetEntry;
     }
   }
@@ -954,11 +998,17 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'mint') {
-      const {address: mintAddress, asset} = payloadJson;
-      const mintAsset = asset + ':mint';
+      const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
-      if (mintAsset === asset && mintAddress === address) {
-        result += 1;
+      if (localAddress === address && localAsset === asset) {
+        result = _roundToCents(result + quantity);
+      }
+    } else if (type === 'minter') {
+      const {address: localAddress, asset: localAsset} = payloadJson;
+      const mintAsset = localAsset + ':mint';
+
+      if (localAddress === address && mintAsset === asset) {
+        result = _roundToCents(result + 1);
       }
     }
   }
@@ -1531,23 +1581,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
       dstAddressEntry[asset] = dstAssetEntry;
-    } else if (type === 'minter') {
-      const {asset, address} = payloadJson;
-      const mintAsset = asset + ':mint';
-
-      let addressEntry = newDb.balances[address];
-      if (addressEntry === undefined){
-        addressEntry = {};
-        newDb.balances[address] = addressEntry;
-      }
-      let mintAssetEntry = addressEntry[mintAsset];
-      if (mintAssetEntry === undefined) {
-        mintAssetEntry = 0;
-      }
-      mintAssetEntry += 1;
-      addressEntry[mintAsset] = mintAssetEntry;
-
-      newDb.minters[asset] = address;
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
@@ -1562,6 +1595,24 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       assetEntry = _roundToCents(assetEntry + quantity);
       addressEntry[asset] = assetEntry;
+    }
+    } else if (type === 'minter') {
+      const {asset, address} = payloadJson;
+      const mintAsset = asset + ':mint';
+
+      let addressEntry = newDb.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        newDb.balances[address] = addressEntry;
+      }
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
+      }
+      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+      addressEntry[mintAsset] = mintAssetEntry;
+
+      newDb.minters[asset] = address;
     }
   }
 
@@ -2479,11 +2530,11 @@ const _listen = () => {
       typeof body.asset === 'string' &&
       typeof body.quantity === 'number' &&
       typeof body.address === 'string' &&
-      typeof body.startHeight === 'number' &&
-      typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {asset, quantity, address, startHeight, timestamp, privateKey} = body;
+      const {asset, quantity, address, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
 
       _createMint({asset, quantity, address, startHeight, timestamp, privateKey})
         .then(() => {
