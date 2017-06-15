@@ -722,12 +722,12 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         addressEntry = {};
         result[address] = addressEntry;
       }
-      let assetEntry = addressEntry[mintAsset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
       }
-      assetEntry += 1;
-      addressEntry[mintAsset] = assetEntry;
+      mintAssetEntry += 1;
+      addressEntry[mintAsset] = mintAssetEntry;
     }
   }
 
@@ -775,12 +775,12 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       if (localAddress === address) {
         const mintAsset = asset + ':mint';
 
-        let assetEntry = result[mintAsset];
-        if (assetEntry === undefined) {
-          assetEntry = 0;
+        let mintAssetEntry = result[mintAsset];
+        if (mintAssetEntry === undefined) {
+          mintAssetEntry = 0;
         }
-        assetEntry += 1;
-        result[mintAsset] = assetEntry;
+        mintAssetEntry += 1;
+        result[mintAsset] = mintAssetEntry;
       }
     }
   }
@@ -878,12 +878,12 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         addressEntry = {};
         result[address] = addressEntry;
       }
-      let assetEntry = addressEntry[mintAsset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
       }
-      assetEntry += 1;
-      addressEntry[mintAsset] = assetEntry;
+      mintAssetEntry += 1;
+      addressEntry[mintAsset] = mintAssetEntry;
     }
   }
 
@@ -1293,17 +1293,17 @@ const _getConfirmedMinter = (db, asset) => db.minters[asset];
 const _getUnconfirmedMinter = (db, mempool, asset) => {
   let minter = db.minters[asset];
 
-  const mintMessages = mempool.messages.filter(message =>
+  const mintAssetMessages = mempool.messages.filter(message =>
     message.type === 'minter' && message.asset === asset ||
     message.type === 'send' && message.asset === (asset + ':mint')
   );
 
   let done = false;
-  while (mintMessages.length > 0 && !done) {
+  while (mintAssetMessages.length > 0 && !done) {
     done = true;
 
-    for (let i = 0; i < mintMessages.length; i++) {
-      const mintMessage = mintMessages[i];
+    for (let i = 0; i < mintAssetMessages.length; i++) {
+      const mintMessage = mintAssetMessages[i];
       const {type} = mintMessage;
 
       if (type === 'minter') {
@@ -1312,7 +1312,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
         if (minter === undefined) {
           minter = address;
           done = false;
-          mintMessages.splice(i, 1);
+          mintAssetMessages.splice(i, 1);
           break;
         }
       } else if (type === 'send') {
@@ -1320,7 +1320,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
         if (minter === srcAddress) {
           minter = dstAddress;
-          mintMessages.splice(i, 1);
+          mintAssetMessages.splice(i, 1);
           done = false;
           break;
         }
@@ -1500,8 +1500,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
       dstAddressEntry[asset] = dstAssetEntry;
 
-      if (/:mint$/.test(asset)) {
-        newDb.minters[asset] = dstAddress;
+      const match = asset.match(/^(.+):mint$/);
+      if (match) {
+        const baseAsset = match[1];
+        newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'charge') { // XXX disallow mint assets here
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
@@ -1538,12 +1540,12 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         addressEntry = {};
         newDb.balances[address] = addressEntry;
       }
-      let assetEntry = addressEntry[mintAsset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
       }
-      assetEntry += 1;
-      addressEntry[mintAsset] = assetEntry;
+      mintAssetEntry += 1;
+      addressEntry[mintAsset] = mintAssetEntry;
 
       newDb.minters[asset] = address;
     } else if (type === 'mint') {
@@ -2425,11 +2427,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMinter', (req, res, next) => {
-    console.log('create minter', req.url, req.headers);
-
-    next();
-  }, cors, bodyParserJson, (req, res, next) => {
+  app.post('/createMinter', cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
