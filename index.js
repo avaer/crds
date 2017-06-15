@@ -3198,7 +3198,9 @@ const _listen = () => {
           break;
         }
         default: {
-          console.warn('invalid command');
+          if (/^.+\n$/.test(cmd)) {
+            console.warn('invalid command');
+          }
           process.stdout.write('> ');
           break;
         }
