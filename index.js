@@ -1175,7 +1175,7 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _getAllConfirmedCharges = db => db.charges;
+const _getAllConfirmedCharges = db => db.charges.slice();
 const _getConfirmedCharges = (db, address) => db.charges.filter(charge => {
   const payloadJson = JSON.parse(charge.payload);
   const {srcAddress, dstAddress} = payloadJson;
