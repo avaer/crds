@@ -261,27 +261,20 @@ class Message {
               }
             }
             case 'minter': {
-              const {asset, quantity, address, publicKey} = payloadJson;
+              const {asset, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                if (quantity > 0 && _roundToCents(quantity) === quantity) {
-                  const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+                const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
-                  if (minter === undefined) {
-                    return null;
-                  } else {
-                    return {
-                      status: 400,
-                      stack: 'asset is already minted',
-                    };
-                  }
+                if (minter === undefined) {
+                  return null;
                 } else {
                   return {
                     status: 400,
-                    error: 'invalid quantity',
+                    stack: 'asset already has minter',
                   };
                 }
               } else {
@@ -2432,7 +2425,11 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMinter', cors, bodyParserJson, (req, res, next) => {
+  app.post('/createMinter', (req, res, next) => {
+    console.log('create minter', req.url, req.headers);
+
+    next();
+  }, cors, bodyParserJson, (req, res, next) => {
     const {body} = req;
 
     if (
