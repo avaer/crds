@@ -1175,11 +1175,37 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
   return result;
 };
+const _getAllConfirmedCharges = db => db.charges;
 const _getConfirmedCharges = (db, address) => db.charges.filter(charge => {
   const payloadJson = JSON.parse(charge.payload);
   const {srcAddress, dstAddress} = payloadJson;
   return srcAddress === address || dstAddress === address;
 });
+const _getAllUnconfirmedCharges = (db, mempool) => {
+  const result = _getAllConfirmedCharges(db);
+
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'charge') {
+      result.push(message);
+    }
+  }
+
+  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
+  for (let i = 0; i < invalidatedCharges.length; i++) {
+    const invalidatedCharge = invalidatedCharges[i];
+    const index = result.findIndex(charge => charge.signature === invalidatedCharge.signature);
+
+    if (index !== -1) {
+      result.splice(index, 1);
+    }
+  }
+
+  return result;
+};
 const _getUnconfirmedCharges = (db, mempool, address) => {
   const result = _getConfirmedCharges(db, address);
 
@@ -2990,6 +3016,13 @@ const _listen = () => {
             process.stdout.write('> ');
           }
 
+          break;
+        }
+        case 'charges': {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const charges = _getAllUnconfirmedCharges(db, mempool);
+          console.log(JSON.stringify(charges, null, 2));
+          process.stdout.write('> ');
           break;
         }
         case 'minter': {
