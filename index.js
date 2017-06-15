@@ -1424,8 +1424,13 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
   return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
-  const charges = db.charges.concat(mempool.messages.filter(({type}) => type === 'charge'));
-  const chargebacks = mempool.messages.filter(({type}) => type === 'chargeback');
+  const _messageTypeEquals = t => message => {
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+    return type === t;
+  };
+  const charges = db.charges.concat(mempool.messages.filter(_messageTypeEquals('charge')));
+  const chargebacks = mempool.messages.filter(_messageTypeEquals('chargeback'));
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
     const chargeMessage = _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
