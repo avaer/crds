@@ -2774,11 +2774,11 @@ const _listen = () => {
       typeof body.srcAsset === 'string' &&
       typeof body.srcQuantity === 'number' &&
       (body.dstAsset === null || (typeof body.dstAsset === 'string')) &&
-      typeof body.dstQuantity === 'number' &&
-      typeof body.startHeight === 'number' &&
-      typeof body.timestamp === 'number'
+      typeof body.dstQuantity === 'number'
     ) {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight,  timestamp} = body;
+      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
 
       _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp})
         .then(() => {
