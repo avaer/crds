@@ -332,39 +332,46 @@ class Message {
             case 'charge': {
               const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
-              if (
-                (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
-                ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
-              ) {
-                if (!mempool) {
-                  if (
-                    _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
-                    (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
-                  ) {
-                    return Promise.resolve();
+              if (_isValidAsset(srcAsset) && (dstAsset === null || _isValidAsset(dstAsset))) {
+                if (
+                  (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
+                  ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
+                ) {
+                  if (!mempool) {
+                    if (
+                      _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
+                      (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
+                    ) {
+                      return Promise.resolve();
+                    } else {
+                      return {
+                        status: 400,
+                        stack: 'insufficient funds',
+                      };
+                    }
                   } else {
-                    return {
-                      status: 400,
-                      stack: 'insufficient funds',
-                    };
+                    if (
+                      _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
+                      (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
+                    ) {
+                      return null;
+                    } else {
+                      return {
+                        status: 400,
+                        stack: 'insufficient funds',
+                      };
+                    }
                   }
                 } else {
-                  if (
-                    _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
-                    (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
-                  ) {
-                    return null;
-                  } else {
-                    return {
-                      status: 400,
-                      stack: 'insufficient funds',
-                    };
-                  }
+                  return {
+                    status: 400,
+                    error: 'invalid quantities',
+                  };
                 }
               } else {
                 return {
                   status: 400,
-                  error: 'invalid quantities',
+                  error: 'invalid assets',
                 };
               }
             }
