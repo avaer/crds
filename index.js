@@ -42,6 +42,14 @@ const DEFAULT_DB = {
   },
 };
 
+/* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
+const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
+const address = _getAddressFromPublicKey(publicKey); // G4ExZ6nYBPnu7Sr1c8kMgbzz3VS9DbGi6cNeghEirbHj
+
+const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
+const publicKey2 = eccrypto.getPublic(privateKey2); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+const address2 = _getAddressFromPublicKey(publicKey2); // GJfJvo6ZbDXV31g5QuLSKF3NTWQLc36VVNXJBcyhRehY */
+
 const args = process.argv.slice(2);
 const _findArg = name => {
   for (let i = 0; i < args.length; i++) {
@@ -184,17 +192,16 @@ class Message {
 
   verify(db, blocks, mempool = null) {
     const {payload, signature} = this;
+    const payloadJson = JSON.parse(payload);
+    const {type} = payloadJson;
 
-    if (signature) {
-      const payloadJson = JSON.parse(payload);
+    if (signature || type === 'charge') {
       const {startHeight} = payloadJson;
       const endHeight = startHeight + MESSAGE_TTL;
       const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
       if (nextHeight >= startHeight && nextHeight < endHeight) {
         if (!db.messageRevocations.some(signatures => signatures.includes(signature))) {
-          const {type} = payloadJson;
-
           switch (type) {
             case 'coinbase': {
               const {asset, quantity, address} = payloadJson;
@@ -654,14 +661,6 @@ let mempool = {
 };
 let peers = [];
 const api = new EventEmitter();
-
-/* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
-const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
-const address = _getAddressFromPublicKey(publicKey); // G4ExZ6nYBPnu7Sr1c8kMgbzz3VS9DbGi6cNeghEirbHj
-
-const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
-const publicKey2 = eccrypto.getPublic(privateKey2); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
-const address2 = _getAddressFromPublicKey(publicKey2); // GJfJvo6ZbDXV31g5QuLSKF3NTWQLc36VVNXJBcyhRehY */
 
 const _clone = o => JSON.parse(JSON.stringify(o));
 const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
@@ -2874,8 +2873,7 @@ const _listen = () => {
         case 'send': {
           const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
           const quantityNumber = parseFloat(quantityString);
-          const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
-          const startHeight = topBlockHeight + 1;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
@@ -2890,7 +2888,7 @@ const _listen = () => {
         }
         case 'addminter': {
           const [, address, asset, privateKey] = split;
-          const startHeight = blocks.length + 1;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           _createMinter({address, asset, startHeight, timestamp, privateKey})
@@ -2906,7 +2904,7 @@ const _listen = () => {
         case 'mint': {
           const [, asset, quantityString, address, privateKey] = split;
           const quantityNumber = parseFloat(quantityString);
-          const startHeight = blocks.length + 1;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
@@ -2924,7 +2922,7 @@ const _listen = () => {
           const dstAssetValue = dstAsset || null;
           const srcQuantityNumber = parseFloat(srcQuantity);
           const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
-          const startHeight = blocks.length + 1;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
@@ -2939,7 +2937,7 @@ const _listen = () => {
         }
         case 'chargeback': {
           const [, chargeSignature, privateKey] = split;
-          const startHeight = blocks.length + 1;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
