@@ -391,7 +391,8 @@ class Message {
 
               if (chargeMessaage) {
                 const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
-                const {srcAddress, dstAddress, publicKey} = chargeMessagePayloadJson;
+                const {srcAddress, dstAddress} = chargeMessagePayloadJson;
+                const {publicKey} = payloadJson;
                 const publicKeyBuffer = new Buffer(publicKey, 'base64');
                 const payloadHash = crypto.createHash('sha256').update(payload).digest();
                 const signatureBuffer = new Buffer(signature, 'base64');
@@ -1265,7 +1266,7 @@ const _findChargeBlockHeight = (blocks, chargeSignature) => {
   }
   return -1;
 };
-const _findLocalChargeMessage = (messages, signature) => {
+const _findLocalChargeMessage = (messages, chargeSignature) => {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     const {payload, signature} = message;
@@ -1297,7 +1298,7 @@ const _findUnconfirmedChargeMessage = (blocks, mempool, chargeSignature) => {
   if (confirmedChargeMessage !== null) {
     return confirmedChargeMessage;
   } else {
-    return _findLocalChargeMessage(messages, mempool.messages);
+    return _findLocalChargeMessage(mempool.messages, chargeSignature);
   }
 };
 class AddressAssetSpec {
@@ -2814,6 +2815,7 @@ const _listen = () => {
   });
 
   const _createChargeback = ({chargeSignature, startHeight, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'chargeback', chargeSignature, publicKey: publicKeyString, startHeight, timestamp});
@@ -2835,11 +2837,11 @@ const _listen = () => {
     if (
       body &&
       typeof body.chargeSignature === 'string' &&
-      typeof body.startHeight === 'number' &&
-      typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {chargeSignature, startHeight, timestamp, privateKey} = body;
+      const {chargeSignature, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
 
       _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
         .then(() => {
