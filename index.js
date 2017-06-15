@@ -864,70 +864,55 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
     const {type} = payloadJson;
 
     if (type === 'coinbase') {
-      const {asset: a, quantity, address} = payloadJson;
+      const {asset, quantity, address: localAddress} = payloadJson;
 
-      let addressEntry = db.balances[address];
-      if (addressEntry === undefined){
-        addressEntry = {};
-        result[address] = addressEntry;
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = _roundToCents(assetEntry + quantity);
       }
-      let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
-      addressEntry[asset] = _roundToCents(assetEntry + quantity);
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
-      let srcAddressEntry = db.balances[srcAddress];
-      if (srcAddressEntry === undefined) {
-        srcAddressEntry = {};
-        result[srcAddress] = srcAddressEntry;
+      if (srcAddress === address) {
+        let srcAssetEntry = result[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(srcAssetEntry - quantity);
       }
-      let srcAssetEntry = srcAddressEntry[asset];
-      if (srcAssetEntry === undefined) {
-        srcAssetEntry = 0;
-      }
-      srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
 
-      let dstAddressEntry = db.balances[dstAddress];
-      if (dstAddressEntry === undefined) {
-        dstAddressEntry = {};
-        result[dstAddress] = dstAddressEntry;
+      if (dstAddress === address) {
+        let dstAssetEntry = result[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(dstAssetEntry + quantity);
       }
-      let dstAssetEntry = dstAddressEntry[asset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
-      }
-      dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
     } else if (type === 'mint') {
-      const {address, asset, quantity} = payloadJson;
+      const {address: localAddress, asset, quantity} = payloadJson;
 
-      let addressEntry = db.balances[address];
-      if (addressEntry === undefined){
-        addressEntry = {};
-        result[address] = addressEntry;
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = _roundToCents(assetEntry + quantity);
       }
-      let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
-      addressEntry[asset] = _roundToCents(assetEntry + quantity);
     } else if (type === 'minter') {
-      const {address, asset} = payloadJson;
+      const {address: localAddress, asset} = payloadJson;
       const mintAsset = asset + ':mint';
 
-      let addressEntry = db.balances[address];
-      if (addressEntry === undefined){
-        addressEntry = {};
-        result[address] = addressEntry;
+      if (localAddress === address) {
+        let mintAssetEntry = result[mintAsset];
+        if (mintAssetEntry === undefined) {
+          mintAssetEntry = 0;
+        }
+        mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+        result[mintAsset] = mintAssetEntry;
       }
-      let mintAssetEntry = addressEntry[mintAsset];
-      if (mintAssetEntry === undefined) {
-        mintAssetEntry = 0;
-      }
-      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
-      addressEntry[mintAsset] = mintAssetEntry;
     }
   }
 
@@ -1595,7 +1580,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       assetEntry = _roundToCents(assetEntry + quantity);
       addressEntry[asset] = assetEntry;
-    }
     } else if (type === 'minter') {
       const {asset, address} = payloadJson;
       const mintAsset = asset + ':mint';
