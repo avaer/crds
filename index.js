@@ -1105,29 +1105,39 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
   const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
   for (let i = 0; i < invalidatedCharges.length; i++) {
     const charge = invalidatedCharges[i];
-    const {asset, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
+    const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = JSON.parse(charge.payload);
 
-    let srcAddressEntry = db.balances[srcAddress];
-    if (srcAddressEntry === undefined){
-      srcAddressEntry = {};
-      result[srcAddress] = srcAddressEntry;
+    if (srcAddress === address) {
+      let srcAssetEntry = result[srcAsset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      result[srcAsset] = _roundToCents(srcAssetEntry + srcQuantity);
     }
-    let srcAssetEntry = srcAddressEntry[asset];
-    if (srcAssetEntry === undefined) {
-      srcAssetEntry = 0;
+    if (dstAddress === address) {
+      let dstAssetEntry = result[srcAsset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      result[srcAsset] = _roundToCents(dstAssetEntry - srcQuantity);
     }
-    srcAddressEntry[asset] = _roundToCents(srcAssetEntry + quantity);
 
-    let dstAddressEntry = db.balances[dstAddress];
-    if (dstAddressEntry === undefined){
-      dstAddressEntry = {};
-      result[dstAddress] = dstAddressEntry;
+    if (dstAsset) {
+      if (dstAddress === address) {
+        let dstAssetEntry = result[dstAsset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[dstAsset] = _roundToCents(dstAssetEntry + dstQuantity);
+      }
+      if (srcAddress === address) {
+        let srcAssetEntry = result[dstAsset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[dstAsset] = _roundToCents(srcAssetEntry - dstQuantity);
+      }
     }
-    let dstAssetEntry = dstAddressEntry[asset];
-    if (dstAssetEntry === undefined) {
-      dstAssetEntry = 0;
-    }
-    dstAddressEntry[asset] = _roundToCents(dstAssetEntry - quantity);
   }
 
   return result;
