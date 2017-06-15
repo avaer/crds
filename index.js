@@ -2395,11 +2395,11 @@ const _listen = () => {
       typeof body.quantity === 'number' &&
       typeof body.srcAddress === 'string' &&
       typeof body.dstAddress === 'string' &&
-      typeof body.startHeight === 'number' &&
-      typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey} = body;
+      const {asset, quantity, srcAddress, dstAddress, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
 
       _createSend({asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey})
         .then(() => {
@@ -2439,11 +2439,11 @@ const _listen = () => {
       body &&
       typeof body.address === 'string' &&
       typeof body.asset === 'string' &&
-      typeof body.startHeight === 'number' &&
-      typeof body.timestamp === 'number' &&
       typeof body.privateKey === 'string'
     ) {
-      const {address, asset, startHeight, timestamp, privateKey} = body;
+      const {address, asset, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
 
       _createMinter({address, asset, startHeight, timestamp, privateKey})
         .then(() => {
