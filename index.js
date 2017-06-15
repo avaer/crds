@@ -323,11 +323,17 @@ class Message {
               }
             }
             case 'charge': {
-              const {asset, quantity, srcAddress} = payloadJson;
+              const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
-              if (quantity > 0 && _roundToCents(quantity) === quantity) {
+              if (
+                (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
+                ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
+              ) {
                 if (!mempool) {
-                  if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                  if (
+                    _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
+                    (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
+                  ) {
                     return Promise.resolve();
                   } else {
                     return {
@@ -336,7 +342,10 @@ class Message {
                     };
                   }
                 } else {
-                  if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
+                  if (
+                    _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
+                    (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
+                  ) {
                     return null;
                   } else {
                     return {
@@ -348,7 +357,7 @@ class Message {
               } else {
                 return {
                   status: 400,
-                  error: 'invalid quantity',
+                  error: 'invalid quantities',
                 };
               }
             }
@@ -981,14 +990,20 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'charge') {
-      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
+      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
-      if (a === asset) {
-        if (srcAddress === address) {
-          result = _roundToCents(result - quantity);
+      if (srcAddress === address && srcAsset === asset) {
+        result = _roundToCents(result - srcQuantity);
+      }
+      if (dstAddress === address && srcAsset === asset) {
+        result = _roundToCents(result + srcQuantity);
+      }
+      if (dstAsset) {
+        if (dstAddress === address && dstAsset === asset) {
+          result = _roundToCents(result - dstQuantity);
         }
-        if (dstAddress === address) {
-          result = _roundToCents(result + quantity);
+        if (srcAddress === address && dstAsset === asset) {
+          result = _roundToCents(result + dstQuantity);
         }
       }
     } else if (type === 'mint') {
@@ -1550,31 +1565,57 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'charge') {
-      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
+      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
       let srcAddressEntry = newDb.balances[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
         newDb.balances[srcAddress] = srcAddressEntry;
       }
-      let srcAssetEntry = srcAddressEntry[asset];
+      let srcAssetEntry = srcAddressEntry[srcAsset];
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
       srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
-      srcAddressEntry[asset] = srcAssetEntry;
+      srcAddressEntry[srcAsset] = srcAssetEntry;
 
       let dstAddressEntry = newDb.balances[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
         newDb.balances[dstAddress] = dstAddressEntry;
       }
-      let dstAssetEntry = dstAddressEntry[asset];
+      let dstAssetEntry = dstAddressEntry[srcAsset];
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
       dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
-      dstAddressEntry[asset] = dstAssetEntry;
+      dstAddressEntry[srcAsset] = dstAssetEntry;
+
+      if (dstAsset) {
+        let dstAddressEntry = newDb.balances[dstAddress];
+        if (dstAddressEntry === undefined){
+          dstAddressEntry = {};
+          newDb.balances[dstAddress] = dstAddressEntry;
+        }
+        let dstAssetEntry = dstAddressEntry[dstAsset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        dstAssetEntry = _roundToCents(dstAssetEntry - quantity);
+        dstAddressEntry[dstAsset] = dstAssetEntry;
+
+        let srcAddressEntry = newDb.balances[srcAddress];
+        if (srcAddressEntry === undefined){
+          srcAddressEntry = {};
+          newDb.balances[srcAddress] = srcAddressEntry;
+        }
+        let srcAssetEntry = srcAddressEntry[dstAsset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        srcAssetEntry = _roundToCents(srcAssetEntry + quantity);
+        srcAddressEntry[dstAsset] = srcAssetEntry;
+      }
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
@@ -2543,8 +2584,8 @@ const _listen = () => {
     }
   });
 
-  const _createCharge = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp}) => {
-    const payload = JSON.stringify({type: 'charge', asset, quantity, srcAddress, dstAddress, startHeight, timestamp});
+  const _createCharge = ({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp}) => {
+    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp});
     const message = new Message(payload, null);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
@@ -2559,16 +2600,18 @@ const _listen = () => {
 
     if (
       body &&
-      typeof body.asset === 'string' &&
-      typeof body.quantity === 'number' &&
       typeof body.srcAddress === 'string' &&
       typeof body.dstAddress === 'string' &&
+      typeof body.srcAsset === 'string' &&
+      typeof body.srcQuantity === 'number' &&
+      (body.dstAsset === null || (typeof body.dstAsset === 'string')) &&
+      typeof body.dstQuantity === 'number' &&
       typeof body.startHeight === 'number' &&
       typeof body.timestamp === 'number'
     ) {
-      const {asset, quantity, srcAddress, dstAddress, startHeight,  timestamp} = body;
+      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight,  timestamp} = body;
 
-      _createCharge({asset, quantity, srcAddress, dstAddress, startHeight, timestamp})
+      _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp})
         .then(() => {
           res.json({ok: true});
         })
@@ -2877,12 +2920,14 @@ const _listen = () => {
           break;
         }
         case 'charge': {
-          const [, asset, quantity, srcAddress, dstAddress] = split;
-          const quantityNumber = parseFloat(quantity);
+          const [, srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = split;
+          const dstAssetValue = dstAsset || null;
+          const srcQuantityNumber = parseFloat(srcQuantity);
+          const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
           const startHeight = blocks.length + 1;
           const timestamp = Date.now();
 
-          _createCharge({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp})
+          _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
