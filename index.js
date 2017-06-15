@@ -227,7 +227,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
-                if (quantity > 0 && _roundToCents(quantity) === quantity) {
+                if (quantity > 0 && _roundToCents(quantity) === quantity && (!/:mint$/.test(asset) || quantity === 1)) {
                   if (!mempool) {
                     if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
                       return null;
