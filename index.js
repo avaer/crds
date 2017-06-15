@@ -2600,13 +2600,13 @@ const _listen = () => {
   app.get('/charges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getConfirmedCharges(db, address);
+    const charges = _getConfirmedCharges(db, address).map(charge => JSON.parse(charge.payload));
     res.json(charges);
   });
   app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getUnconfirmedCharges(db, mempool, address);
+    const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => JSON.parse(charge.payload));
     res.json(charges);
   });
 
@@ -3020,7 +3020,7 @@ const _listen = () => {
         }
         case 'charges': {
           const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const charges = _getAllUnconfirmedCharges(db, mempool);
+          const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => JSON.parse(charge.payload));
           console.log(JSON.stringify(charges, null, 2));
           process.stdout.write('> ');
           break;
