@@ -685,6 +685,11 @@ const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypt
 const _isValidAsset = asset => /^[A-Z]+$/.test(asset);
 const _isMintAsset = asset => /:mint$/.test(asset);
 const _roundToCents = n => Math.round(n * 100) / 100;
+const _decorateCharge = charge => {
+  const result = JSON.parse(charge.payload);
+  result.signature = charge.signature;
+  return result;
+};
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
@@ -2617,13 +2622,13 @@ const _listen = () => {
   app.get('/charges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getConfirmedCharges(db, address).map(charge => JSON.parse(charge.payload));
+    const charges = _getConfirmedCharges(db, address).map(charge => _decorateCharge(charge));
     res.json(charges);
   });
   app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
     const {address} = req.params;
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => JSON.parse(charge.payload));
+    const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => _decorateCharge(charge));
     res.json(charges);
   });
 
@@ -3041,7 +3046,7 @@ const _listen = () => {
         }
         case 'charges': {
           const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => JSON.parse(charge.payload));
+          const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
           console.log(JSON.stringify(charges, null, 2));
           process.stdout.write('> ');
           break;
