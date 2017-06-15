@@ -41,6 +41,10 @@ const DEFAULT_DB = {
     [CRD]: null,
   },
 };
+const DEFAULT_MEMPOOL = {
+  blocks: [],
+  messages: [],
+};
 
 /* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
@@ -136,7 +140,7 @@ class Block {
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
         const message = this.messages[i];
-        const error = message.verify(db, blocks, mempool);
+        const error = message.verify(db, blocks, mempool, this.messages);
         if (error) {
           return error;
         }
@@ -190,7 +194,7 @@ class Message {
     return this.signature === message.signature;
   }
 
-  verify(db, blocks, mempool = null) {
+  verify(db, blocks, mempool = null, confirmingMessages = []) {
     const {payload, signature} = this;
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
@@ -346,7 +350,7 @@ class Message {
                         _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
                         (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
                       ) {
-                        return Promise.resolve();
+                        return null;
                       } else {
                         return {
                           status: 400,
@@ -387,10 +391,15 @@ class Message {
             }
             case 'chargeback': {
               const {chargeSignature} = payloadJson;
-              const chargeMessaage = !mempool ? _findConfirmedChargeMessage(blocks, chargeSignature) : _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
+              const chargeMessage = (
+                !mempool ?
+                  _findConfirmedChargeMessage(blocks, chargeSignature)
+                :
+                  _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature)
+              ) || _findConfirmingChargeMessage(confirmingMessages, chargeSignature);
 
-              if (chargeMessaage) {
-                const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
+              if (chargeMessage) {
+                const chargeMessagePayloadJson = JSON.parse(chargeMessage.payload);
                 const {srcAddress, dstAddress} = chargeMessagePayloadJson;
                 const {publicKey} = payloadJson;
                 const publicKeyBuffer = new Buffer(publicKey, 'base64');
@@ -411,12 +420,15 @@ class Message {
               } else {
                 return {
                   status: 400,
-                  stack: 'no such charge to chargeback',
+                  error: 'no such charge to chargeback',
                 };
               }
             }
             default: {
-              return Promise.reject(new Error('unknown message type: ' + type));
+              return {
+                status: 400,
+                error: 'unknown message type',
+              };
             }
           }
         } else {
@@ -671,15 +683,6 @@ class Peer {
   }
 }
 
-let dbs = [];
-let blocks = [];
-let mempool = {
-  blocks: [],
-  messages: [],
-};
-let peers = [];
-const api = new EventEmitter();
-
 const _clone = o => JSON.parse(JSON.stringify(o));
 const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
@@ -691,6 +694,12 @@ const _decorateCharge = charge => {
   result.signature = charge.signature;
   return result;
 };
+
+let dbs = [];
+let blocks = [];
+let mempool = _clone(DEFAULT_MEMPOOL);
+let peers = [];
+const api = new EventEmitter();
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
@@ -1301,6 +1310,7 @@ const _findUnconfirmedChargeMessage = (blocks, mempool, chargeSignature) => {
     return _findLocalChargeMessage(mempool.messages, chargeSignature);
   }
 };
+const _findConfirmingChargeMessage = (confirmingMessages, chargeSignature) => _findLocalChargeMessage(confirmingMessages, chargeSignature);
 class AddressAssetSpec {
   constructor(address, asset, balance, charges) {
     this.address = address;
@@ -1705,7 +1715,8 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
-    const payloadJson = JSON.parse(message.payload);
+    const {payload, signature} = message;
+    const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
 
     if (type === 'coinbase') {
@@ -1755,56 +1766,69 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
+      const isImmediatelyChargedback = block.messages.some(otherMessage => {
+        const otherPayloadJson = JSON.parse(otherMessage.payload);
+        const {type: otherType} = otherPayloadJson;
 
-      let srcAddressEntry = newDb.balances[srcAddress];
-      if (srcAddressEntry === undefined){
-        srcAddressEntry = {};
-        newDb.balances[srcAddress] = srcAddressEntry;
-      }
-      let srcAssetEntry = srcAddressEntry[srcAsset];
-      if (srcAssetEntry === undefined) {
-        srcAssetEntry = 0;
-      }
-      srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
-      srcAddressEntry[srcAsset] = srcAssetEntry;
-
-      let dstAddressEntry = newDb.balances[dstAddress];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        newDb.balances[dstAddress] = dstAddressEntry;
-      }
-      let dstAssetEntry = dstAddressEntry[srcAsset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
-      }
-      dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
-      dstAddressEntry[srcAsset] = dstAssetEntry;
-
-      if (dstAsset) {
-        let dstAddressEntry = newDb.balances[dstAddress];
-        if (dstAddressEntry === undefined){
-          dstAddressEntry = {};
-          newDb.balances[dstAddress] = dstAddressEntry;
+        if (otherType === 'chargeback') {
+          const {chargeSignature: otherChargeSignature} = otherPayloadJson;
+          return otherChargeSignature === signature;
+        } else {
+          return false;
         }
-        let dstAssetEntry = dstAddressEntry[dstAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        dstAssetEntry = _roundToCents(dstAssetEntry - quantity);
-        dstAddressEntry[dstAsset] = dstAssetEntry;
+      });
+      if (!isImmediatelyChargedback) {
+        const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
         let srcAddressEntry = newDb.balances[srcAddress];
         if (srcAddressEntry === undefined){
           srcAddressEntry = {};
           newDb.balances[srcAddress] = srcAddressEntry;
         }
-        let srcAssetEntry = srcAddressEntry[dstAsset];
+        let srcAssetEntry = srcAddressEntry[srcAsset];
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        srcAssetEntry = _roundToCents(srcAssetEntry + quantity);
-        srcAddressEntry[dstAsset] = srcAssetEntry;
+        srcAssetEntry = _roundToCents(srcAssetEntry - srcQuantity);
+        srcAddressEntry[srcAsset] = srcAssetEntry;
+
+        let dstAddressEntry = newDb.balances[dstAddress];
+        if (dstAddressEntry === undefined){
+          dstAddressEntry = {};
+          newDb.balances[dstAddress] = dstAddressEntry;
+        }
+        let dstAssetEntry = dstAddressEntry[srcAsset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        dstAssetEntry = _roundToCents(dstAssetEntry + srcQuantity);
+        dstAddressEntry[srcAsset] = dstAssetEntry;
+
+        if (dstAsset) {
+          let dstAddressEntry = newDb.balances[dstAddress];
+          if (dstAddressEntry === undefined){
+            dstAddressEntry = {};
+            newDb.balances[dstAddress] = dstAddressEntry;
+          }
+          let dstAssetEntry = dstAddressEntry[dstAsset];
+          if (dstAssetEntry === undefined) {
+            dstAssetEntry = 0;
+          }
+          dstAssetEntry = _roundToCents(dstAssetEntry - dstQuantity);
+          dstAddressEntry[dstAsset] = dstAssetEntry;
+
+          let srcAddressEntry = newDb.balances[srcAddress];
+          if (srcAddressEntry === undefined){
+            srcAddressEntry = {};
+            newDb.balances[srcAddress] = srcAddressEntry;
+          }
+          let srcAssetEntry = srcAddressEntry[dstAsset];
+          if (srcAssetEntry === undefined) {
+            srcAssetEntry = 0;
+          }
+          srcAssetEntry = _roundToCents(srcAssetEntry + dstQuantity);
+          srcAddressEntry[dstAsset] = srcAssetEntry;
+        }
       }
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
