@@ -227,7 +227,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
-                if (quantity > 0 && _roundToCents(quantity) === quantity && (!/:mint$/.test(asset) || quantity === 1)) {
+                if (quantity > 0 && _roundToCents(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
                   if (!mempool) {
                     if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
                       return null;
@@ -270,7 +270,14 @@ class Message {
                 const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
                 if (minter === undefined) {
-                  return null;
+                  if (_isValidAsset(asset)) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'invalid asset name',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
@@ -650,6 +657,8 @@ const address2 = _getAddressFromPublicKey(publicKey2); // GJfJvo6ZbDXV31g5QuLSKF
 const _clone = o => JSON.parse(JSON.stringify(o));
 const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
+const _isValidAsset = asset => /^[A-Z]+$/.test(asset);
+const _isMintAsset = asset => /:mint$/.test(asset);
 const _roundToCents = n => Math.round(n * 100) / 100;
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
@@ -1540,7 +1549,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         const baseAsset = match[1];
         newDb.minters[baseAsset] = dstAddress;
       }
-    } else if (type === 'charge') { // XXX disallow mint assets here
+    } else if (type === 'charge') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = newDb.balances[srcAddress];
