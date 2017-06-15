@@ -16,6 +16,7 @@ const ws = require('ws');
 const writeFileAtomic = require('write-file-atomic');
 const replHistory = require('repl.history');
 const bigint = require('big-integer');
+const base58 = require('bs58');
 const eccrypto = require('eccrypto-sync');
 
 const BLOCK_VERSION = '0.0.1';
@@ -220,13 +221,12 @@ class Message {
               break;
             }
             case 'send': {
-              const {asset, quantity, srcAddress} = payloadJson;
-              const publicKey = srcAddress;
+              const {asset, quantity, srcAddress, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
                 if (quantity > 0 && _roundToCents(quantity) === quantity) {
                   if (!mempool) {
                     if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
@@ -261,13 +261,12 @@ class Message {
               }
             }
             case 'minter': {
-              const {asset, quantity, address} = payloadJson;
-              const publicKey = address;
+              const {asset, quantity, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
                 if (quantity > 0 && _roundToCents(quantity) === quantity) {
                   const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
@@ -293,13 +292,12 @@ class Message {
               }
             }
             case 'mint': {
-              const {asset, quantity, address} = payloadJson;
-              const publicKey = address;
+              const {asset, quantity, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
                 if (quantity > 0 && _roundToCents(quantity) === quantity) {
                   const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
@@ -360,15 +358,15 @@ class Message {
 
               if (chargeMessaage) {
                 const chargeMessagePayloadJson = JSON.parse(chargeMessaage.payload);
-                const {srcAddress, dstAddress} = chargeMessagePayloadJson;
+                const {srcAddress, dstAddress, publicKey} = chargeMessagePayloadJson;
+                const publicKeyBuffer = new Buffer(publicKey, 'base64');
                 const payloadHash = crypto.createHash('sha256').update(payload).digest();
                 const signatureBuffer = new Buffer(signature, 'base64');
 
-                const _checkSignature = publicKey => {
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  return eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer);
-                };
-                if (_checkSignature(srcAddress) && _checkSignature(dstAddress)) {
+                const _checkSignature = address =>
+                  eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) &&
+                  _getAddressFromPublicKey(publicKeyBuffer) === address;
+                if (_checkSignature(srcAddress) || _checkSignature(dstAddress)) {
                   return null;
                 } else {
                   return {
@@ -650,11 +648,15 @@ const api = new EventEmitter();
 
 /* const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
 const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
+const address = _getAddressFromPublicKey(publicKey); // G4ExZ6nYBPnu7Sr1c8kMgbzz3VS9DbGi6cNeghEirbHj
 
 const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
-const publicKey2 = eccrypto.getPublic(privateKey); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4= */
+const publicKey2 = eccrypto.getPublic(privateKey2); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+const address2 = _getAddressFromPublicKey(publicKey2); // GJfJvo6ZbDXV31g5QuLSKF3NTWQLc36VVNXJBcyhRehY */
 
 const _clone = o => JSON.parse(JSON.stringify(o));
+const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
+const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
 const _roundToCents = n => Math.round(n * 100) / 100;
 
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
@@ -1852,7 +1854,7 @@ const doHash = () => new Promise((accept, reject) => {
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
   const height = topBlockHeight + 1;
-  const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: minePublicKey, startHeight: height, timestamp: Date.now()});
+  const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp: Date.now()});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
   const privateKeyBuffer = COINBASE_PRIVATE_KEY;
   const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
@@ -2368,7 +2370,9 @@ const _listen = () => {
 
   const _createSend = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, timestamp});
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, publicKey: publicKeyString, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
 
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2413,7 +2417,9 @@ const _listen = () => {
 
   const _createMinter = ({address, asset, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'minter', address, asset, startHeight, timestamp});
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'minter', address, asset, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -2455,7 +2461,9 @@ const _listen = () => {
 
   const _createMint = ({asset, quantity, address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const payload = JSON.stringify({type: 'mint', asset, quantity, address, startHeight, timestamp});
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'mint', asset, quantity, address, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -2536,7 +2544,9 @@ const _listen = () => {
   });
 
   const _createChargeback = ({chargeSignature, startHeight, timestamp, privateKey}) => {
-    const payload = JSON.stringify({type: 'chargeback', chargeSignature, startHeight, timestamp});
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'chargeback', chargeSignature, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -2729,8 +2739,11 @@ const _listen = () => {
           process.stdout.write('> ');
           break;
         }
-        case 'forks': {
-          console.log(JSON.stringify(mempool.blocks, null, 2));
+        case 'getaddress': {
+          const [, privateKey] = split;
+          const privateKeyBuffer = new Buffer(privateKey, 'base64');
+          const address = _getAddressFromPrivateKey(privateKeyBuffer);
+          console.log(address);
           process.stdout.write('> ');
           break;
         }
@@ -2856,7 +2869,7 @@ const _listen = () => {
           break;
         }
         case 'mine': {
-          console.log(minePublicKey !== null);
+          console.log(mineAddress !== null);
           process.stdout.write('> ');
 
           break;
@@ -2914,7 +2927,7 @@ const _listen = () => {
   });
 };
 
-let minePublicKey = null;
+let mineAddress = null;
 let mineImmediate = null;
 const _mine = () => {
   doHash()
@@ -2935,14 +2948,14 @@ const _mine = () => {
       mineImmediate = setImmediate(_mine);
     });
 };
-const _startMine = publicKey => {
+const _startMine = address => {
   _stopMine();
 
-  minePublicKey = publicKey;
+  mineAddress = address;
   mineImmediate = setImmediate(_mine);
 };
 const _stopMine = () => {
-  minePublicKey = null;
+  mineAddress = null;
 
   clearImmediate(mineImmediate);
   mineImmediate = null;
