@@ -1325,10 +1325,14 @@ class AddressAssetSpec {
 }
 const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
   const charges = db.charges.slice();
-  const chargebacks = block.messages.filter(({type}) => type === 'chargeback');
+  const chargebacks = block.messages.filter(message => {
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+    return type === 'chargeback';
+  });
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature);
+    const chargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature) || _findConfirmingChargeMessage(block.messages, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -1712,6 +1716,18 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   const newDb = _clone(db);
   _decorateDb(newDb);
 
+  const immediateChargebackSignatures = block.messages.map(message => {
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'chargeback') {
+      const {chargeSignature} = payloadJson;
+      return chargeSignature;
+    } else {
+      return null;
+    }
+  }).filter(signature => signature !== null);
+
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
@@ -1766,18 +1782,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'charge') {
-      const isImmediatelyChargedback = block.messages.some(otherMessage => {
-        const otherPayloadJson = JSON.parse(otherMessage.payload);
-        const {type: otherType} = otherPayloadJson;
-
-        if (otherType === 'chargeback') {
-          const {chargeSignature: otherChargeSignature} = otherPayloadJson;
-          return otherChargeSignature === signature;
-        } else {
-          return false;
-        }
-      });
-      if (!isImmediatelyChargedback) {
+      if (!immediateChargebackSignatures.includes(signature)) {
         const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
         let srcAddressEntry = newDb.balances[srcAddress];
