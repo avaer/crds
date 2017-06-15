@@ -27,12 +27,12 @@ const HASH_WORK_TIME = 20;
 const MIN_NUM_LIVE_PEERS = 10;
 const CRD = 'CRD';
 const COINBASE_QUANTITY = 1;
-const COINBASE_PRIVATE_KEY = (() => {
+const NULL_PRIVATE_KEY = (() => {
   const result = Buffer.alloc(32);
   result[0] = 0xFF;
   return result;
 })();
-const COINBASE_PUBLIC_KEY = eccrypto.getPublic(COINBASE_PRIVATE_KEY);
+const NULL_PUBLIC_KEY = eccrypto.getPublic(NULL_PRIVATE_KEY);
 const DEFAULT_DB = {
   balances: {},
   charges: [],
@@ -195,7 +195,7 @@ class Message {
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
 
-    if (signature || type === 'charge') {
+    if (signature) {
       const {startHeight} = payloadJson;
       const endHeight = startHeight + MESSAGE_TTL;
       const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
@@ -205,7 +205,7 @@ class Message {
           switch (type) {
             case 'coinbase': {
               const {asset, quantity, address} = payloadJson;
-              const publicKeyBuffer = COINBASE_PUBLIC_KEY;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
@@ -331,47 +331,57 @@ class Message {
             }
             case 'charge': {
               const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const payloadHash = crypto.createHash('sha256').update(payload).digest();
+              const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (_isValidAsset(srcAsset) && (dstAsset === null || _isValidAsset(dstAsset))) {
-                if (
-                  (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
-                  ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
-                ) {
-                  if (!mempool) {
-                    if (
-                      _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
-                      (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
-                    ) {
-                      return Promise.resolve();
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isValidAsset(srcAsset) && (dstAsset === null || _isValidAsset(dstAsset))) {
+                  if (
+                    (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
+                    ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
+                  ) {
+                    if (!mempool) {
+                      if (
+                        _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
+                        (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
+                      ) {
+                        return Promise.resolve();
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'insufficient funds',
+                        };
+                      }
                     } else {
-                      return {
-                        status: 400,
-                        stack: 'insufficient funds',
-                      };
+                      if (
+                        _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
+                        (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
+                      ) {
+                        return null;
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'insufficient funds',
+                        };
+                      }
                     }
                   } else {
-                    if (
-                      _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
-                      (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
-                    ) {
-                      return null;
-                    } else {
-                      return {
-                        status: 400,
-                        stack: 'insufficient funds',
-                      };
-                    }
+                    return {
+                      status: 400,
+                      error: 'invalid quantities',
+                    };
                   }
                 } else {
                   return {
                     status: 400,
-                    error: 'invalid quantities',
+                    error: 'invalid assets',
                   };
                 }
               } else {
                 return {
                   status: 400,
-                  error: 'invalid assets',
+                  error: 'invalid signature',
                 };
               }
             }
@@ -2105,7 +2115,7 @@ const doHash = () => new Promise((accept, reject) => {
   const height = topBlockHeight + 1;
   const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp: Date.now()});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
-  const privateKeyBuffer = COINBASE_PRIVATE_KEY;
+  const privateKeyBuffer = NULL_PRIVATE_KEY;
   const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
   const signatureString = signature.toString('base64');
   const coinbaseMessage = new Message(payload, signatureString);
@@ -2754,8 +2764,12 @@ const _listen = () => {
   });
 
   const _createCharge = ({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp}) => {
+    const privateKeyBuffer = NULL_PRIVATE_KEY;
     const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp});
-    const message = new Message(payload, null);
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
