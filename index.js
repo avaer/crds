@@ -348,26 +348,46 @@ class Message {
                   ) {
                     if (!mempool) {
                       if (
-                        _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
-                        (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
+                        !_getConfirmedLocked(db, srcAddess) &&
+                        (dstAsset === null || !_getConfirmedLocked(db, dstAddress))
                       ) {
-                        return null;
+                        if (
+                          _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
+                          (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
+                        ) {
+                          return null;
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'insufficient funds',
+                          };
+                        }
                       } else {
                         return {
                           status: 400,
-                          stack: 'insufficient funds',
+                          stack: 'addresses locked',
                         };
                       }
                     } else {
                       if (
-                        _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
-                        (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
+                        !_getUnconfirmedLocked(db, mempool, srcAddess) &&
+                        (dstAsset === null || !_getUnconfirmedLocked(db, mempool, dstAddress))
                       ) {
-                        return null;
+                        if (
+                          _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
+                          (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
+                        ) {
+                          return null;
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'insufficient funds',
+                          };
+                        }
                       } else {
                         return {
                           status: 400,
-                          stack: 'insufficient funds',
+                          stack: 'addresses locked',
                         };
                       }
                     }
@@ -400,21 +420,35 @@ class Message {
                 if (_isValidAsset(srcAsset)) {
                   if (quantity > 0 && _roundToCents(quantity) === quantity) {
                     if (!mempool) {
-                      if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
-                        return null;
+                      if (!_getConfirmedLocked(db, srcAddress)) {
+                        if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                          return null;
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'insufficient funds',
+                          };
+                        }
                       } else {
                         return {
                           status: 400,
-                          stack: 'insufficient funds',
+                          stack: 'address locked',
                         };
                       }
                     } else {
-                      if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
-                        return null;
+                      if (!_getUnconfirmedLocked(db, mempool, srcAddress)) {
+                        if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
+                          return null;
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'insufficient funds',
+                          };
+                        }
                       } else {
                         return {
                           status: 400,
-                          stack: 'insufficient funds',
+                          stack: 'address locked',
                         };
                       }
                     }
