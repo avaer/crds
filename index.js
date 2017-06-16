@@ -389,14 +389,61 @@ class Message {
                 };
               }
             }
+            case 'pack': {
+              const {srcAddress, dstAddress, asset, quantity} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const payloadHash = crypto.createHash('sha256').update(payload).digest();
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isValidAsset(srcAsset)) {
+                  if (quantity > 0 && _roundToCents(quantity) === quantity) {
+                    if (!mempool) {
+                      if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'insufficient funds',
+                        };
+                      }
+                    } else {
+                      if (_getUnconfirmedUnsettledBalance(db, mempool, srcAddress, asset) >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'insufficient funds',
+                        };
+                      }
+                    }
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
             case 'chargeback': {
               const {chargeSignature} = payloadJson;
               const chargeMessage = (
                 !mempool ?
-                  _findConfirmedChargeMessage(blocks, chargeSignature)
+                  _findConfirmedChargelikeMessage(blocks, chargeSignature)
                 :
-                  _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature)
-              ) || _findConfirmingChargeMessage(confirmingMessages, chargeSignature);
+                  _findUnconfirmedChargelikeMessage(blocks, mempool, chargeSignature)
+              ) || _findConfirmingChargelikeMessage(confirmingMessages, chargeSignature);
 
               if (chargeMessage) {
                 const chargeMessagePayloadJson = JSON.parse(chargeMessage.payload);
@@ -810,6 +857,30 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         }
         srcAddressEntry[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
       }
+    } else if (type === 'pack') {
+      const {srcAddress, dstAddress, asset, quantity} = payloadJson;
+
+      let srcAddressEntry = result[asset];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        result[asset] = srcAddressEntry;
+      }
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
+
+      let dstAddressEntry = result[asset];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        result[asset] = dstAddressEntry;
+      }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
     } else if (type === 'mint') {
       const {address, asset, quantity} = payloadJson;
 
@@ -914,6 +985,23 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
           result[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
         }
       }
+    } else if (type === 'pack') {
+      const {srcAddress, dstAddress, asset, quantity} = payloadJson;
+
+      if (srcAddress === address) {
+        let srcAssetEntry = result[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(srcAssetEntry - quantity);
+      }
+      if (dstAddress === address) {
+        let dstAssetEntry = result[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(dstAssetEntry + quantity);
+      }
     } else if (type === 'mint') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
@@ -987,6 +1075,17 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           if (srcAddress === address) {
             result = _roundToCents(result + dstQuantity);
           }
+        }
+      }
+    } else if (type === 'pack') {
+      const {srcAddress, dstAddress, asset: localAsset, quantity} = payloadJson;
+
+      if (localAsset === asset) {
+        if (srcAddress === address) {
+          result = _roundToCents(result - quantity);
+        }
+        if (dstAddress === address) {
+          result = _roundToCents(result + quantity);
         }
       }
     } else if (type === 'mint') {
@@ -1076,6 +1175,23 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
           }
           result[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
         }
+      }
+    } else if (type === 'charge') {
+      const {srcAddress, dstAddress, asset, quantity} = payloadJson;
+
+      if (srcAddress === address) {
+        let srcAssetEntry = result[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(srcAssetEntry - quantity);
+      }
+      if (dstAddress === address) {
+        let dstAssetEntry = result[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[asset] = _roundToCents(dstAssetEntry + quantity);
       }
     } else if (type === 'mint') {
       const {address: localAddress, asset, quantity} = payloadJson;
@@ -1184,6 +1300,15 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
           result = _roundToCents(result + dstQuantity);
         }
       }
+    } else if (type === 'pack') {
+      const {srcAddress, dstAddress, asset: localAsset, quantity} = payloadJson;
+
+      if (srcAddress === address && localAsset === asset) {
+        result = _roundToCents(result - quantity);
+      }
+      if (dstAddress === address && localAsset === asset) {
+        result = _roundToCents(result + quantity);
+      }
     } else if (type === 'mint') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
@@ -1231,7 +1356,7 @@ const _getAllUnconfirmedCharges = (db, mempool) => {
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
-    if (type === 'charge') {
+    if (type === 'charge' || type === 'pack') {
       result.push(message);
     }
   }
@@ -1256,7 +1381,7 @@ const _getUnconfirmedCharges = (db, mempool, address) => {
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
-    if (type === 'charge') {
+    if (type === 'charge' || type === 'pack') {
       result.push(message);
     }
   }
@@ -1273,11 +1398,11 @@ const _getUnconfirmedCharges = (db, mempool, address) => {
 
   return result;
 };
-const _findChargeBlockHeight = (blocks, chargeSignature) => {
+const _findChargelikeBlockHeight = (blocks, chargeSignature) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
-    const chargeMessage = _findLocalChargeMessage(messages, chargeSignature);
+    const chargeMessage = _findLocalChargelikeMessage(messages, chargeSignature);
 
     if (chargeMessage) {
       return block.height;
@@ -1285,24 +1410,24 @@ const _findChargeBlockHeight = (blocks, chargeSignature) => {
   }
   return -1;
 };
-const _findLocalChargeMessage = (messages, chargeSignature) => {
+const _findLocalChargelikeMessage = (messages, chargeSignature) => {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     const {payload, signature} = message;
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
 
-    if (type === 'charge' && signature === chargeSignature) {
+    if ((type === 'charge' || type === 'pack') && signature === chargeSignature) {
       return message;
     }
   }
   return null;
 };
-const _findConfirmedChargeMessage = (blocks, chargeSignature) => {
+const _findConfirmedChargelikeMessage = (blocks, chargeSignature) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
-    const message = _findLocalChargeMessage(messages, chargeSignature);
+    const message = _findLocalChargelikeMessage(messages, chargeSignature);
 
     if (message) {
       return message;
@@ -1311,16 +1436,16 @@ const _findConfirmedChargeMessage = (blocks, chargeSignature) => {
 
   return null;
 };
-const _findUnconfirmedChargeMessage = (blocks, mempool, chargeSignature) => {
-  const confirmedChargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature);
+const _findUnconfirmedChargelikeMessage = (blocks, mempool, chargeSignature) => {
+  const confirmedChargelikeMessage = _findConfirmedChargelikeMessage(blocks, chargeSignature);
 
-  if (confirmedChargeMessage !== null) {
-    return confirmedChargeMessage;
+  if (confirmedChargelikeMessage !== null) {
+    return confirmedChargelikeMessage;
   } else {
-    return _findLocalChargeMessage(mempool.messages, chargeSignature);
+    return _findLocalChargelikeMessage(mempool.messages, chargeSignature);
   }
 };
-const _findConfirmingChargeMessage = (confirmingMessages, chargeSignature) => _findLocalChargeMessage(confirmingMessages, chargeSignature);
+const _findConfirmingChargelikeMessage = (confirmingMessages, chargeSignature) => _findLocalChargelikeMessage(confirmingMessages, chargeSignature);
 class AddressAssetSpec {
   constructor(address, asset, balance, charges) {
     this.address = address;
@@ -1342,7 +1467,7 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
   });
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findConfirmedChargeMessage(blocks, chargeSignature) || _findConfirmingChargeMessage(block.messages, chargeSignature);
+    const chargeMessage = _findConfirmedChargelikeMessage(blocks, chargeSignature) || _findConfirmingChargelikeMessage(block.messages, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -1448,16 +1573,16 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
   return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
-  const _messageTypeEquals = t => message => {
+  const _messageTypeEqualsOneOf = types => message => {
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
-    return type === t;
+    return types.includes(type);
   };
-  const charges = db.charges.concat(mempool.messages.filter(_messageTypeEquals('charge')));
-  const chargebacks = mempool.messages.filter(_messageTypeEquals('chargeback'));
+  const charges = db.charges.concat(mempool.messages.filter(_messageTypeEqualsOneOf(['charge', 'pack'])));
+  const chargebacks = mempool.messages.filter(_messageTypeEqualsOneOf(['chargeback']));
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
     const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findUnconfirmedChargeMessage(blocks, mempool, chargeSignature);
+    const chargeMessage = _findUnconfirmedChargelikeMessage(blocks, mempool, chargeSignature);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -1845,6 +1970,34 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
           srcAddressEntry[dstAsset] = srcAssetEntry;
         }
       }
+    } else if (type === 'pack') {
+      if (!immediateChargebackSignatures.includes(signature)) {
+        const {srcAddress, dstAddress, asset, quantity} = payloadJson;
+
+        let srcAddressEntry = newDb.balances[srcAddress];
+        if (srcAddressEntry === undefined){
+          srcAddressEntry = {};
+          newDb.balances[srcAddress] = srcAddressEntry;
+        }
+        let srcAssetEntry = srcAddressEntry[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
+        srcAddressEntry[asset] = srcAssetEntry;
+
+        let dstAddressEntry = newDb.balances[dstAddress];
+        if (dstAddressEntry === undefined){
+          dstAddressEntry = {};
+          newDb.balances[dstAddress] = dstAddressEntry;
+        }
+        let dstAssetEntry = dstAddressEntry[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
+        dstAddressEntry[asset] = dstAssetEntry;
+      }
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
@@ -1885,7 +2038,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
-    if (type === 'charge') {
+    if (type === 'charge' || type === 'pack') {
       newDb.charges.push(message);
     }
   }
@@ -1904,7 +2057,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     const charge = oldCharges[i];
     const chargePayload = JSON.parse(charge.payload);
     const {signature} = chargePayload;
-    const chargeBlockHeight = _findChargeBlockHeight(blocks, signature);
+    const chargeBlockHeight = _findChargelikeBlockHeight(blocks, signature);
 
     if (chargeBlockHeight !== -1 && (nextBlockHeight - chargeBlockHeight) >= CHARGE_SETTLE_BLOCKS) {
       const {asset, quantity, srcAddress, dstAddress} = chargePayload;
