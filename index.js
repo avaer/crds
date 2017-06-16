@@ -245,7 +245,7 @@ class Message {
                       return null;
                     } else {
                       return {
-                        status: 400,
+                        status: 402,
                         error: 'insufficient funds',
                       };
                     }
@@ -254,7 +254,7 @@ class Message {
                       return null;
                     } else {
                       return {
-                        status: 400,
+                        status: 402,
                         error: 'insufficient funds',
                       };
                     }
@@ -358,7 +358,7 @@ class Message {
                           return null;
                         } else {
                           return {
-                            status: 400,
+                            status: 402,
                             stack: 'insufficient funds',
                           };
                         }
@@ -380,7 +380,7 @@ class Message {
                           return null;
                         } else {
                           return {
-                            status: 400,
+                            status: 402,
                             stack: 'insufficient funds',
                           };
                         }
@@ -425,7 +425,7 @@ class Message {
                           return null;
                         } else {
                           return {
-                            status: 400,
+                            status: 402,
                             stack: 'insufficient funds',
                           };
                         }
@@ -441,7 +441,7 @@ class Message {
                           return null;
                         } else {
                           return {
-                            status: 400,
+                            status: 402,
                             stack: 'insufficient funds',
                           };
                         }
