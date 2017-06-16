@@ -3182,6 +3182,92 @@ const _listen = () => {
     }
   });
 
+  const _createLock = ({address, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'lock', address, publicKey: publicKeyString, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
+  app.post('/createLock', cors, bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.address === 'string' &&
+      typeof body.privateKey === 'string'
+    ) {
+      const {address, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createLock({address, startHeight, timestamp, privateKey})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
+  const _createUnlock = ({address, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'unlock', address, publicKey: publicKeyString, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
+  app.post('/createUnlock', cors, bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.address === 'string' &&
+      typeof body.privateKey === 'string'
+    ) {
+      const {address, privateKey} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createUnlock({address, startHeight, timestamp, privateKey})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
   app.get('/blocks/:height', cors, (req, res, next) => {
     const {height: heightStirng} = req.params;
     const height = parseInt(heightStirng, 10);
@@ -3480,6 +3566,36 @@ const _listen = () => {
           const timestamp = Date.now();
 
           _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'lock': {
+          const [, address, privateKey] = split;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+          const timestamp = Date.now();
+
+          _createLock({address, startHeight, timestamp, privateKey})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'unlock': {
+          const [, address, privateKey] = split;
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+          const timestamp = Date.now();
+
+          _createUnlock({address, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
