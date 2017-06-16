@@ -2269,6 +2269,8 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     messages: mempool.messages.filter(mempoolMessage => !block.messages.some(blockMessage => blockMessage.signature === mempoolMessage.signature)),
   };
 
+  // XXX need to re-validate whole mempool here, since the new block might have broken validity
+
   return {
     newDb,
     newMempool,
@@ -2348,6 +2350,8 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
         const slicedMessage = slicedMessages[i];
         _addMessage(newDb, newBlocks, newMempool, slicedMessage);
       }
+
+      // XXX need to re-validate whole mempool here, since the new block might have broken validity
 
       return newMempool;
     } else {
