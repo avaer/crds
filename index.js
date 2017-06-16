@@ -390,12 +390,12 @@ class Message {
               }
             }
             case 'pack': {
-              const {srcAddress, dstAddress, asset, quantity} = payloadJson;
-              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const {srcAddress, dstAddress, asset, quantity, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === dstAddress) {
                 if (_isValidAsset(srcAsset)) {
                   if (quantity > 0 && _roundToCents(quantity) === quantity) {
                     if (!mempool) {
@@ -3011,9 +3011,10 @@ const _listen = () => {
     }
   });
 
-  const _createPack = ({srcAddress, dstAddress, asset, quantity, startHeight, timestamp}) => {
-    const privateKeyBuffer = NULL_PRIVATE_KEY;
-    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, asset, quantity, startHeight, timestamp});
+  const _createPack = ({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, asset, quantity, startHeight, timestamp, publicKey});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
     const signatureString = signature.toString('base64');
@@ -3034,13 +3035,14 @@ const _listen = () => {
       typeof body.srcAddress === 'string' &&
       typeof body.dstAddress === 'string' &&
       typeof body.asset === 'string' &&
-      typeof body.quantity === 'number'
+      typeof body.quantity === 'number' &&
+      typeof body.privateKey === 'string'
     ) {
-      const {srcAddress, dstAddress, asset, quantity} = body;
+      const {srcAddress, dstAddress, asset, quantity, privateKey} = body;
       const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       const timestamp = Date.now();
 
-      _createCharge({srcAddress, dstAddress, asset, quantity, startHeight, timestamp})
+      _createCharge({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -3374,12 +3376,12 @@ const _listen = () => {
           break;
         }
         case 'pack': {
-          const [, srcAddress, asset, quantity, dstAddress] = split;
+          const [, srcAddress, asset, quantity, dstAddress, privateKey] = split;
           const quantityNumber = parseFloat(quantity);
           const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
-          _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp})
+          _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
