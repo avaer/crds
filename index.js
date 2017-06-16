@@ -1259,7 +1259,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
           result[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
         }
       }
-    } else if (type === 'charge') {
+    } else if (type === 'pack') {
       const {srcAddress, dstAddress, asset, quantity} = payloadJson;
 
       if (srcAddress === address) {
