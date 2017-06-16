@@ -1777,11 +1777,16 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
   return minter;
 };
+const _getAllConfirmedLocked = db => _clone(db.locked);
 const _getConfirmedLocked = (db, address) => db.locked[address] || false;
-const _getUnconfirmedLocked = (db, mempool, address) => {
-  let locked = _getConfirmedLocked(db, address);
+const _getAllUnconfirmedLocked = (db, mempool) => {
+  const result = _getAllConfirmedLocked(db);
 
-  const lockAddressMessages = mempool.messages.filter(message => (message.type === 'lock' || message.type === 'unlock') && message.address === address);
+  const lockAddressMessages = mempool.messages.filter(message => {
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+    return type === 'lock' || type === 'unlock';
+  });
 
   let done = false;
   while (lockAddressMessages.length > 0 && !done) {
@@ -1789,10 +1794,46 @@ const _getUnconfirmedLocked = (db, mempool, address) => {
 
     for (let i = 0; i < lockAddressMessages.length; i++) {
       const lockMessage = lockAddressMessages[i];
-      const {address: localAddress} = lockMessage;
+      const payloadJson = JSON.parse(lockMessage.payload);
+      const {type, address} = payloadJson;
+      const oldLocked = result[address] || false;
+
+      if (type === 'lock' && !oldLocked) {
+        result[address] = true;
+        done = false;
+        lockAddressMessages.splice(i, 1);
+        break;
+      } else if (type === 'unlock' && oldLocked) {
+        delete result[address];
+        lockAddressMessages.splice(i, 1);
+        done = false;
+        break;
+      }
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedLocked = (db, mempool, address) => {
+  let locked = _getConfirmedLocked(db, address);
+
+  const lockAddressMessages = mempool.messages.filter(message => {
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+    return type === 'lock' || type === 'unlock';
+  });
+
+  let done = false;
+  while (lockAddressMessages.length > 0 && !done) {
+    done = true;
+
+    for (let i = 0; i < lockAddressMessages.length; i++) {
+      const lockMessage = lockAddressMessages[i];
+      const payloadJson = JSON.parse(lockMessage.payload);
+      const {address: localAddress} = payloadJson;
 
       if (localAddress === address) {
-        const {type} = lockMessage;
+        const {type} = payloadJson;
 
         if (type === 'lock' && !locked) {
           locked = true;
@@ -2119,7 +2160,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     } else if (type === 'unlock') {
       const {address} = payloadJson;
 
-      newDb.locked[address] = false;
+      delete newDb.locked[address];
     } else {
       throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
     }
@@ -3192,7 +3233,7 @@ const _listen = () => {
     }
   });
 
-  const _createLock = ({address, timestamp, privateKey}) => {
+  const _createLock = ({address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
@@ -3235,7 +3276,7 @@ const _listen = () => {
     }
   });
 
-  const _createUnlock = ({address, timestamp, privateKey}) => {
+  const _createUnlock = ({address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
@@ -3618,10 +3659,17 @@ const _listen = () => {
         case 'locked': {
           const [, address] = split;
 
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const locked = _getUnconfirmedLocked(db, mempool, address);
-          console.log(JSON.stringify(locked, null, 2));
-          process.stdout.write('> ');
+          if (address) {
+            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+            const locked = _getUnconfirmedLocked(db, mempool, address);
+            console.log(JSON.stringify(locked, null, 2));
+            process.stdout.write('> ');
+          } else {
+            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+            const result = _getAllUnconfirmedLocked(db, mempool);
+            console.log(JSON.stringify(result, null, 2));
+            process.stdout.write('> ');
+          }
 
           break;
         }
