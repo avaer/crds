@@ -348,7 +348,7 @@ class Message {
                   ) {
                     if (!mempool) {
                       if (
-                        !_getConfirmedLocked(db, srcAddess) &&
+                        !_getConfirmedLocked(db, srcAddress) &&
                         (dstAsset === null || !_getConfirmedLocked(db, dstAddress))
                       ) {
                         if (
@@ -370,7 +370,7 @@ class Message {
                       }
                     } else {
                       if (
-                        !_getUnconfirmedLocked(db, mempool, srcAddess) &&
+                        !_getUnconfirmedLocked(db, mempool, srcAddress) &&
                         (dstAsset === null || !_getUnconfirmedLocked(db, mempool, dstAddress))
                       ) {
                         if (
