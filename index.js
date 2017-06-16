@@ -3011,6 +3011,49 @@ const _listen = () => {
     }
   });
 
+  const _createPack = ({srcAddress, dstAddress, asset, quantity, startHeight, timestamp}) => {
+    const privateKeyBuffer = NULL_PRIVATE_KEY;
+    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, asset, quantity, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
+  app.post('/createPack', cors, bodyParserJson, (req, res, next) => {
+    const {body} = req;
+
+    if (
+      body &&
+      typeof body.srcAddress === 'string' &&
+      typeof body.dstAddress === 'string' &&
+      typeof body.asset === 'string' &&
+      typeof body.quantity === 'number'
+    ) {
+      const {srcAddress, dstAddress, asset, quantity} = body;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createCharge({srcAddress, dstAddress, asset, quantity, startHeight, timestamp})
+        .then(() => {
+          res.json({ok: true});
+        })
+        .catch(err => {
+          res.status(err.status || 500);
+          res.json({error: err.stack});
+        });
+    } else {
+      res.status(400);
+      res.send({error: 'invalid parameters'});
+    }
+  });
+
   const _createChargeback = ({chargeSignature, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3321,6 +3364,22 @@ const _listen = () => {
           const timestamp = Date.now();
 
           _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
+            .then(() => {
+              console.log('ok');
+              process.stdout.write('> ');
+            })
+            .catch(err => {
+              console.warn(err);
+            });
+          break;
+        }
+        case 'pack': {
+          const [, srcAddress, asset, quantity, dstAddress] = split;
+          const quantityNumber = parseFloat(quantity);
+          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+          const timestamp = Date.now();
+
+          _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp})
             .then(() => {
               console.log('ok');
               process.stdout.write('> ');
