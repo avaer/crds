@@ -2112,6 +2112,16 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       addressEntry[mintAsset] = mintAssetEntry;
 
       newDb.minters[asset] = address;
+    } else if (type === 'lock') {
+      const {address} = payloadJson;
+
+      newDb.locked[address] = true;
+    } else if (type === 'unlock') {
+      const {address} = payloadJson;
+
+      newDb.locked[address] = false;
+    } else {
+      throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
     }
   }
 
