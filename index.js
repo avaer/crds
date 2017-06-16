@@ -417,7 +417,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === dstAddress) {
-                if (_isValidAsset(srcAsset)) {
+                if (_isValidAsset(asset)) {
                   if (quantity > 0 && _roundToCents(quantity) === quantity) {
                     if (!mempool) {
                       if (!_getConfirmedLocked(db, srcAddress)) {
@@ -3186,7 +3186,8 @@ const _listen = () => {
   const _createPack = ({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, asset, quantity, startHeight, timestamp, publicKey});
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'pack', srcAddress, dstAddress, asset, quantity, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
     const signatureString = signature.toString('base64');
@@ -3214,7 +3215,7 @@ const _listen = () => {
       const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       const timestamp = Date.now();
 
-      _createCharge({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey})
+      _createPack({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -3275,7 +3276,7 @@ const _listen = () => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'lock', address, publicKey: publicKeyString, startHeight, timestamp});
+    const payload = JSON.stringify({type: 'lock', address, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
@@ -3318,7 +3319,7 @@ const _listen = () => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'unlock', address, publicKey: publicKeyString, startHeight, timestamp});
+    const payload = JSON.stringify({type: 'unlock', address, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
