@@ -3605,6 +3605,16 @@ const _listen = () => {
             });
           break;
         }
+        case 'locked': {
+          const [, address] = split;
+
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const locked = _getUnconfirmedLocked(db, mempool, address);
+          console.log(JSON.stringify(locked, null, 2));
+          process.stdout.write('> ');
+
+          break;
+        }
         case 'mine': {
           console.log(mineAddress !== null);
           process.stdout.write('> ');
