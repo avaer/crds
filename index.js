@@ -943,10 +943,10 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
     } else if (type === 'pack') {
       const {srcAddress, dstAddress, asset, quantity} = payloadJson;
 
-      let srcAddressEntry = result[asset];
+      let srcAddressEntry = result[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
-        result[asset] = srcAddressEntry;
+        result[srcAddress] = srcAddressEntry;
       }
       let srcAssetEntry = srcAddressEntry[asset];
       if (srcAssetEntry === undefined) {
@@ -954,10 +954,10 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       }
       srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
 
-      let dstAddressEntry = result[asset];
+      let dstAddressEntry = result[dstAddress];
       if (dstAddressEntry === undefined){
         dstAddressEntry = {};
-        result[asset] = dstAddressEntry;
+        result[dstAddress] = dstAddressEntry;
       }
       let dstAssetEntry = dstAddressEntry[asset];
       if (dstAssetEntry === undefined) {
