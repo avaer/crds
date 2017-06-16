@@ -40,6 +40,7 @@ const DEFAULT_DB = {
   minters: {
     [CRD]: null,
   },
+  locked: {},
 };
 const DEFAULT_MEMPOOL = {
   blocks: [],
@@ -478,7 +479,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const locked = !mempool ? _getConfirmedLocked(db) : _getUnconfirmedLocked(db, mempool);
+                const locked = !mempool ? _getConfirmedLocked(db, address) : _getUnconfirmedLocked(db, mempool, address);
 
                 if (!locked) {
                   return null;
@@ -502,7 +503,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const locked = !mempool ? _getConfirmedLocked(db) : _getUnconfirmedLocked(db, mempool);
+                const locked = !mempool ? _getConfirmedLocked(db, address) : _getUnconfirmedLocked(db, mempool, address);
 
                 if (locked) {
                   return null;
@@ -1737,7 +1738,7 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
 };
 const _getConfirmedMinter = (db, asset) => db.minters[asset];
 const _getUnconfirmedMinter = (db, mempool, asset) => {
-  let minter = db.minters[asset];
+  let minter = _getConfirmedMinter(db, asset);
 
   const mintAssetMessages = mempool.messages.filter(message =>
     message.type === 'minter' && message.asset === asset ||
@@ -1775,6 +1776,40 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
   }
 
   return minter;
+};
+const _getConfirmedLocked = (db, address) => db.locked[address] || false;
+const _getUnconfirmedLocked = (db, mempool, address) => {
+  let locked = _getConfirmedLocked(db, address);
+
+  const lockAddressMessages = mempool.messages.filter(message => (message.type === 'lock' || message.type === 'unlock') && message.address === address);
+
+  let done = false;
+  while (lockAddressMessages.length > 0 && !done) {
+    done = true;
+
+    for (let i = 0; i < lockAddressMessages.length; i++) {
+      const lockMessage = lockAddressMessages[i];
+      const {address: localAddress} = lockMessage;
+
+      if (localAddress === address) {
+        const {type} = lockMessage;
+
+        if (type === 'lock' && !locked) {
+          locked = true;
+          done = false;
+          lockAddressMessages.splice(i, 1);
+          break;
+        } else if (type === 'unlock' && locked) {
+          locked = false;
+          lockAddressMessages.splice(i, 1);
+          done = false;
+          break;
+        }
+      }
+    }
+  }
+
+  return locked;
 };
 const _checkBlockExists = (blocks, mempool, block) => {
   const checkBlockIndex = block.height - 1;
