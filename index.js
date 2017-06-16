@@ -471,6 +471,54 @@ class Message {
                 };
               }
             }
+            case 'lock': {
+              const {address, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const payloadHash = crypto.createHash('sha256').update(payload).digest();
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+                const locked = !mempool ? _getConfirmedLocked(db) : _getUnconfirmedLocked(db, mempool);
+
+                if (!locked) {
+                  return null;
+                } else {
+                  return {
+                    status: 400,
+                    stack: 'address is already locked',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'unlock': {
+              const {address, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const payloadHash = crypto.createHash('sha256').update(payload).digest();
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+                const locked = !mempool ? _getConfirmedLocked(db) : _getUnconfirmedLocked(db, mempool);
+
+                if (locked) {
+                  return null;
+                } else {
+                  return {
+                    status: 400,
+                    stack: 'address is not locked',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
             default: {
               return {
                 status: 400,
