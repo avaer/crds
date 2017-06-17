@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const events = require('events');
 const {EventEmitter} = events;
 const path = require('path');

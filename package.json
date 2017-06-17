@@ -3,6 +3,9 @@
   "version": "0.0.2",
   "description": "",
   "main": "index.js",
+  "bin" : {
+    "crds": "index.js"
+  },
   "dependencies": {
     "big-integer": "^1.6.23",
     "body-parser": "^1.17.2",
