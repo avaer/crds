@@ -4,7 +4,7 @@
 
 ```
 npm i -g crds
-crds
+crds host=127.0.0.1 port=9999 dataDirectory=~/.crds
 ```
 
 Blockchain currency for decentralized, permissionless, realtime, programmatic value exchange. Supports:

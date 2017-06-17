@@ -64,7 +64,7 @@ const protocol = parseInt(_findArg('protocol')) || 'http';
 const host = parseInt(_findArg('host')) || '0.0.0.0';
 const port = parseInt(_findArg('port')) || 9999;
 const localUrl = `${protocol}://${host}:${port}`;
-const dataDirectory = _findArg('dataDirectory') || 'data';
+const dataDirectory = _findArg('dataDirectory') || path.join(__dirname, 'data');
 
 class Block {
   constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
@@ -2541,10 +2541,9 @@ const doHash = () => new Promise((accept, reject) => {
   }
 });
 
-const dataPath = path.join(__dirname, dataDirectory);
-const dbDataPath = path.join(dataPath, 'db');
-const blocksDataPath = path.join(dataPath, 'blocks');
-const peersDataPath = path.join(dataPath, 'peers.txt');
+const dbDataPath = path.join(dataDirectory, 'db');
+const blocksDataPath = path.join(dataDirectory, 'blocks');
+const peersDataPath = path.join(dataDirectory, 'peers.txt');
 const _decorateDb = db => {
   db.charges = db.charges.map(charge => Message.from(charge));
 };
@@ -2680,7 +2679,7 @@ const _loadState = () => {
 };
 const _ensureDataPaths = () => {
   const dataDirectories = [
-    dataPath,
+    dataDirectory,
     dbDataPath,
     blocksDataPath,
   ];
@@ -3760,7 +3759,7 @@ const _listen = () => {
       }
     },
   });
-  replHistory(r, path.join(dataPath, 'history.txt'));
+  replHistory(r, path.join(dataDirectory, 'history.txt'));
   r.on('exit', () => {
     console.log();
     process.exit(0);
