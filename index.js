@@ -61,8 +61,8 @@ const _findArg = name => {
   return null;
 };
 const protocol = parseInt(_findArg('protocol')) || 'http';
-const host = parseInt(_findArg('host')) || '0.0.0.0';
-const port = parseInt(_findArg('port')) || 9999;
+const host = _findArg('host') || '0.0.0.0';
+const port = parseInt(_findArg('port'), 10) || 9999;
 const localUrl = `${protocol}://${host}:${port}`;
 const dataDirectory = _findArg('dataDirectory') || path.join(__dirname, 'data');
 
