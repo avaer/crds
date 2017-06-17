@@ -1,0 +1,7 @@
+const privateKey = new Buffer('9reoEGJiw+5rLuH6q9Z7UwmCSG9UUndExMPuWzrc50c=', 'base64');
+const publicKey = eccrypto.getPublic(privateKey); // BCqREvEkTNfj0McLYve5kUi9cqeEjK4d4T5HQU+hv+Dv+EsDZ5HONk4lcQVImjWDV5Aj8Qy+ALoKlBAk0vsvq1Q=
+const address = _getAddressFromPublicKey(publicKey); // G4ExZ6nYBPnu7Sr1c8kMgbzz3VS9DbGi6cNeghEirbHj
+
+const privateKey2 = new Buffer('0S5CM+e3u2Y1vx6kM/sVHUcHaWHoup1pSZ0ty1lxZek=', 'base64');
+const publicKey2 = eccrypto.getPublic(privateKey2); // BL6r5/T6dVKfKpeh43LmMJQrOXYOjbDX1zcwgA8hyK6ScDFUUf35NAyFq8AgQfNsMuP+LPiCreOIjdOrDV5eAD4=
+const address2 = _getAddressFromPublicKey(publicKey2); // GJfJvo6ZbDXV31g5QuLSKF3NTWQLc36VVNXJBcyhRehY
