@@ -3475,287 +3475,268 @@ const _listen = () => {
     }
   });
 
+  const commands = {
+    db: args => {
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      console.log(JSON.stringify(db, null, 2));
+      process.stdout.write('> ');
+    },
+    blockcount: args => {
+      const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+      console.log(JSON.stringify(blockcount, null, 2));
+      process.stdout.write('> ');
+    },
+    blockcache: args => {
+      console.log(JSON.stringify(blocks, null, 2));
+      process.stdout.write('> ');
+    },
+    mempool: args => {
+      console.log(JSON.stringify(mempool.messages, null, 2));
+      process.stdout.write('> ');
+    },
+    getaddress: args => {
+      const [privateKey] = args;
+      const privateKeyBuffer = new Buffer(privateKey, 'base64');
+      const address = _getAddressFromPrivateKey(privateKeyBuffer);
+      console.log(address);
+      process.stdout.write('> ');
+    },
+    balance: args => {
+      const [address, asset] = args;
+
+      if (address && asset) {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const balance = _getUnconfirmedBalance(db, mempool, address, asset);
+        console.log(JSON.stringify(balance, null, 2));
+        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+        process.stdout.write('> ')
+      } else if (address) {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const balances = _getUnconfirmedBalances(db, mempool, address);
+        console.log(JSON.stringify(balances, null, 2));
+        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+        process.stdout.write('> ');
+      } else {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
+        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+        process.stdout.write('> ');
+      }
+    },
+    charges: args => {
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
+      console.log(JSON.stringify(charges, null, 2));
+      process.stdout.write('> ');
+    },
+    minter: args => {
+      const [asset] = args;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const minter = _getUnconfirmedMinter(db, mempool, asset);
+      console.log(JSON.stringify(minter, null, 2));
+      process.stdout.write('> ');
+    },
+    minters: args => {
+      const [asset] = args;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      console.log(JSON.stringify(db.minters, null, 2));
+      process.stdout.write('> ');
+    },
+    send: args => {
+      const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
+      const quantityNumber = parseFloat(quantityString);
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    addminter: args => {
+      const [address, asset, privateKey] = args;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createMinter({address, asset, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    mint: args => {
+      const [asset, quantityString, address, privateKey] = args;
+      const quantityNumber = parseFloat(quantityString);
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    charge: args => {
+      const [srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = args;
+      const dstAssetValue = dstAsset || null;
+      const srcQuantityNumber = parseFloat(srcQuantity);
+      const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    pack: args => {
+      const [srcAddress, asset, quantity, dstAddress, privateKey] = args;
+      const quantityNumber = parseFloat(quantity);
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    chargeback: args => {
+      const [chargeSignature, privateKey] = args;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    lock: args => {
+      const [address, privateKey] = args;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createLock({address, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    unlock: args => {
+      const [address, privateKey] = args;
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      _createUnlock({address, startHeight, timestamp, privateKey})
+        .then(() => {
+          console.log('ok');
+          process.stdout.write('> ');
+        })
+        .catch(err => {
+          console.warn(err);
+        });
+    },
+    locked: args => {
+      const [address] = args;
+
+      if (address) {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const locked = _getUnconfirmedLocked(db, mempool, address);
+        console.log(JSON.stringify(locked, null, 2));
+        process.stdout.write('> ');
+      } else {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const result = _getAllUnconfirmedLocked(db, mempool);
+        console.log(JSON.stringify(result, null, 2));
+        process.stdout.write('> ');
+      }
+    },
+    mine: args => {
+      console.log(mineAddress !== null);
+      process.stdout.write('> ');
+    },
+    startmine: args => {
+      const [publicKey] = args;
+
+      _startMine(publicKey);
+      process.stdout.write('> ');
+    },
+    stopmine: args => {
+      _stopMine();
+      process.stdout.write('> ');
+    },
+    peers: args => {
+      if (peers.length > 0) {
+        console.log(peers.map(({url}) => url).join('\n'));
+      }
+      process.stdout.write('> ');
+    },
+    addpeer: args => {
+      const [url] = args;
+
+      _addPeer(url);
+      process.stdout.write('> ');
+    },
+    removepeer: args => {
+      const [url] = args;
+
+      _removePeer(url);
+      process.stdout.write('> ');
+    },
+    help: args => {
+      console.log('Available commands:');
+      console.log(
+        Object.keys(commands)
+          .map(cmd => '    ' + cmd)
+          .join('\n')
+      );
+      process.stdout.write('> ');
+    },
+  };
+
   const r = repl.start({
     prompt: '> ',
     terminal: true,
-    eval: (cmd, context, filename, callback) => {
-      const split = cmd.split(/\s/);
-      const command = split[0];
+    eval: (s, context, filename, callback) => {
+      const split = s.split(/\s/);
+      const cmd = split[0];
+      const args = split.slice(1);
 
-      switch (command) {
-        case 'db': {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          console.log(JSON.stringify(db, null, 2));
-          process.stdout.write('> ');
-          break;
+      const command = commands[cmd];
+      if (command) {
+        command(args);
+      } else {
+        if (/^.+\n$/.test(s)) {
+          console.warn('invalid command');
         }
-        case 'blockcount': {
-          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-          console.log(JSON.stringify(blockcount, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'blockcache': {
-          console.log(JSON.stringify(blocks, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'mempool': {
-          console.log(JSON.stringify(mempool.messages, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'getaddress': {
-          const [, privateKey] = split;
-          const privateKeyBuffer = new Buffer(privateKey, 'base64');
-          const address = _getAddressFromPrivateKey(privateKeyBuffer);
-          console.log(address);
-          process.stdout.write('> ');
-          break;
-        }
-        case 'balance': {
-          const [, address, asset] = split;
-
-          if (address && asset) {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const balance = _getUnconfirmedBalance(db, mempool, address, asset);
-            console.log(JSON.stringify(balance, null, 2));
-            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-            process.stdout.write('> ')
-          } else if (address) {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const balances = _getUnconfirmedBalances(db, mempool, address);
-            console.log(JSON.stringify(balances, null, 2));
-            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-            process.stdout.write('> ');
-          } else {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
-            const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-            console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-            process.stdout.write('> ');
-          }
-
-          break;
-        }
-        case 'charges': {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
-          console.log(JSON.stringify(charges, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'minter': {
-          const [, asset] = split;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const minter = _getUnconfirmedMinter(db, mempool, asset);
-          console.log(JSON.stringify(minter, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'minters': {
-          const [, asset] = split;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          console.log(JSON.stringify(db.minters, null, 2));
-          process.stdout.write('> ');
-          break;
-        }
-        case 'send': {
-          const [, asset, quantityString, srcAddress, dstAddress, privateKey] = split;
-          const quantityNumber = parseFloat(quantityString);
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'addminter': {
-          const [, address, asset, privateKey] = split;
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createMinter({address, asset, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'mint': {
-          const [, asset, quantityString, address, privateKey] = split;
-          const quantityNumber = parseFloat(quantityString);
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'charge': {
-          const [, srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = split;
-          const dstAssetValue = dstAsset || null;
-          const srcQuantityNumber = parseFloat(srcQuantity);
-          const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'pack': {
-          const [, srcAddress, asset, quantity, dstAddress, privateKey] = split;
-          const quantityNumber = parseFloat(quantity);
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'chargeback': {
-          const [, chargeSignature, privateKey] = split;
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'lock': {
-          const [, address, privateKey] = split;
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createLock({address, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'unlock': {
-          const [, address, privateKey] = split;
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          const timestamp = Date.now();
-
-          _createUnlock({address, startHeight, timestamp, privateKey})
-            .then(() => {
-              console.log('ok');
-              process.stdout.write('> ');
-            })
-            .catch(err => {
-              console.warn(err);
-            });
-          break;
-        }
-        case 'locked': {
-          const [, address] = split;
-
-          if (address) {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const locked = _getUnconfirmedLocked(db, mempool, address);
-            console.log(JSON.stringify(locked, null, 2));
-            process.stdout.write('> ');
-          } else {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const result = _getAllUnconfirmedLocked(db, mempool);
-            console.log(JSON.stringify(result, null, 2));
-            process.stdout.write('> ');
-          }
-
-          break;
-        }
-        case 'mine': {
-          console.log(mineAddress !== null);
-          process.stdout.write('> ');
-
-          break;
-        }
-        case 'startmine': {
-          const [, publicKey] = split;
-
-          _startMine(publicKey);
-          process.stdout.write('> ');
-
-          break;
-        }
-        case 'stopmine': {
-          _stopMine();
-          process.stdout.write('> ');
-
-          break;
-        }
-        case 'peers': {
-          if (peers.length > 0) {
-            console.log(peers.map(({url}) => url).join('\n'));
-          }
-          process.stdout.write('> ');
-
-          break;
-        }
-        case 'addpeer': {
-          const [, url] = split;
-
-          _addPeer(url);
-          process.stdout.write('> ');
-
-          break;
-        }
-        case 'removepeer': {
-          const [, url] = split;
-
-          _removePeer(url);
-          process.stdout.write('> ');
-
-          break;
-        }
-        default: {
-          if (/^.+\n$/.test(cmd)) {
-            console.warn('invalid command');
-          }
-          process.stdout.write('> ');
-          break;
-        }
+        process.stdout.write('> ');
       }
     },
   });
