@@ -7,12 +7,12 @@ npm i -g crds
 crds host=127.0.0.1 port=9999 dataDirectory=~/.crds
 ```
 
-Blockchain currency for decentralized, permissionless, realtime, programmatic value exchange. Supports:
+`CRD` ("credits") is a blockchain currency for decentralized, permissionless, realtime, programmatic value exchange. Supports:
 
 - Mining
 - **Custom token minting** (permissioned)
 - **Charges** (permissionless)
-- **Chargebacks** (windowed)
+- **Chargebacks** (timeboxed)
 
 Implemented in pure Javascript.
 
