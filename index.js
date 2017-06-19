@@ -26,6 +26,8 @@ const MESSAGE_TTL = 10;
 const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
 const HASH_WORK_TIME = 20;
+const TARGET_BLOCKS = 10;
+const TARGET_TIME = 10 * 60 * 1000;
 const MIN_NUM_LIVE_PEERS = 10;
 const CRD = 'CRD';
 const COINBASE_QUANTITY = 1;
@@ -123,7 +125,6 @@ class Block {
 
   verify(db, blocks, mempool = null) {
     const _checkHash = () => this.getHash() === this.hash;
-    const _checkDifficulty = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
     const _checkPrevHash = () => {
       const prevBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
       return this.prevHash === prevBlockHash;
@@ -132,6 +133,8 @@ class Block {
       const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       return this.height === nextBlockHeight;
     };
+    const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
+    const _checkSufficientDifficulty = () => this.difficulty >= _getNextBlockDifficulty(blocks);
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
         const message = this.messages[i];
@@ -148,11 +151,6 @@ class Block {
         status: 400,
         error: 'invalid hash',
       };
-    } else if (!_checkDifficulty()) {
-      return {
-        status: 400,
-        error: 'invalid difficulty',
-      };
     } else if (!_checkPrevHash()) {
       return {
         status: 400,
@@ -162,6 +160,16 @@ class Block {
       return {
         status: 400,
         error: 'invalid height',
+      };
+    } else if (!_checkDifficultyClaim()) {
+      return {
+        status: 400,
+        error: 'invalid difficulty claim',
+      };
+    } else if (!_checkSufficientDifficulty()) {
+      return {
+        status: 400,
+        error: 'insufficient difficulty',
       };
     } else {
       const error = _verifyMessages();
@@ -828,8 +836,8 @@ const api = new EventEmitter();
 const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
 const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
 const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
-const difficulty = 1e5;
-const target = _getDifficultyTarget(difficulty);
+const initialDifficulty = 1e5;
+const initialTarget = _getDifficultyTarget(initialDifficulty);
 const zeroHash = bigint(0).toString(16);
 
 const _getAllConfirmedBalances = db => _clone(db.balances);
@@ -2271,7 +2279,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   };
 };
 const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideChainBlocks) => {
-  const _getBlocksDifficulty = blocks => {
+  const _getBlocksTotalDifficulty = blocks => {
     let result = 0;
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
@@ -2281,8 +2289,8 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     return result;
   };
   const forkedBlockHeight = forkedBlock ? forkedBlock.height : 0;
-  const mainChainDifficulty = _getBlocksDifficulty(blocks.slice(forkedBlockHeight));
-  const sideChainDifficulty = _getBlocksDifficulty(sideChainBlocks.slice(forkedBlockHeight));
+  const mainChainDifficulty = _getBlocksTotalDifficulty(blocks.slice(forkedBlockHeight));
+  const sideChainDifficulty = _getBlocksTotalDifficulty(sideChainBlocks.slice(forkedBlockHeight));
   const needsReorg = sideChainDifficulty > mainChainDifficulty;
 
   const _getBlocksMessages = blocks => {
@@ -2474,6 +2482,53 @@ const _addMessage = (db, blocks, mempool, message) => {
   }
 };
 
+const _getNextBlockDifficulty = blocks => {
+  const initialBlocks = (() => {
+    const result = [];
+
+    const numInitialBlocks = Math.max(TARGET_BLOCKS - blocks.length, 0);
+    const now = Date.now();
+    for (let i = 0; i < numInitialBlocks; i++) {
+      const distance = numInitialBlocks - i;
+
+      result.push({
+        difficulty: initialDifficulty,
+        timestamp: now - ((TARGET_TIME / TARGET_BLOCKS) * distance),
+      });
+    }
+
+    return result;
+  })();
+  const checkBlocks = initialBlocks.concat(blocks.slice(-TARGET_BLOCKS));
+  const checkBlocksTimeDiff = (() => {
+    let firstCheckBlock = null;
+    let lastCheckBlock = null;
+    for (let i = 0; i < checkBlocks.length; i++) {
+      const checkBlock = checkBlocks[i];
+
+      if (firstCheckBlock === null || checkBlock.timestamp < firstCheckBlock.timestamp) {
+        firstCheckBlock = checkBlock;
+      }
+      if (lastCheckBlock === null || checkBlock.timestamp > lastCheckBlock.timestamp) {
+        lastCheckBlock = checkBlock;
+      }
+    }
+    return lastCheckBlock.timestamp - firstCheckBlock.timestamp;
+  })();
+  const expectedTimeDiff = TARGET_TIME;
+  const averageDifficulty = (() => {
+    let acc = 0;
+    for (let i = 0; i < checkBlocks.length; i++) {
+      const checkBlock = checkBlocks[i];
+      acc += checkBlock.difficulty;
+    }
+    return acc / checkBlocksTimeDiff;
+  })();
+  const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, 2), 0.5);
+  const newDifficulty = Math.max(Math.round(averageDifficulty / accuracyFactor), 1);
+  return newDifficulty;
+};
+
 let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
@@ -2482,6 +2537,8 @@ const doHash = () => new Promise((accept, reject) => {
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
   const height = topBlockHeight + 1;
+  const difficulty = _getNextBlockDifficulty(blocks);
+  const target = _getDifficultyTarget(difficulty);
   const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp: Date.now()});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
   const privateKeyBuffer = NULL_PRIVATE_KEY;
