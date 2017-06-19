@@ -133,6 +133,7 @@ class Block {
       const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       return this.height === nextBlockHeight;
     };
+    const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
     const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
     const _checkSufficientDifficulty = () => this.difficulty >= _getNextBlockDifficulty(blocks);
     const _verifyMessages = () => {
@@ -160,6 +161,11 @@ class Block {
       return {
         status: 400,
         error: 'invalid height',
+      };
+    } else if (!_checkTimestamp()) {
+      return {
+        status: 400,
+        error: 'invalid timestamp',
       };
     } else if (!_checkDifficultyClaim()) {
       return {
@@ -2482,6 +2488,36 @@ const _addMessage = (db, blocks, mempool, message) => {
   }
 };
 
+const _getNextBlockMinTimestamp = blocks => {
+  const initialBlocks = (() => {
+    const result = [];
+
+    const numInitialBlocks = Math.max(TARGET_BLOCKS - blocks.length, 0);
+    const now = Date.now();
+    for (let i = 0; i < numInitialBlocks; i++) {
+      const distance = numInitialBlocks - i;
+
+      result.push({
+        timestamp: now - ((TARGET_TIME / TARGET_BLOCKS) * distance),
+      });
+    }
+
+    return result;
+  })();
+  const checkBlocks = initialBlocks.concat(blocks.slice(-TARGET_BLOCKS));
+  const sortedCheckBlocks = checkBlocks.slice()
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const medianTimestamp = (() => {
+    const middleIndex = Math.floor((sortedCheckBlocks.length - 1) / 2);
+
+    if (sortedCheckBlocks.length % 2) {
+        return sortedCheckBlocks[middleIndex].timestamp;
+    } else {
+        return (sortedCheckBlocks[middleIndex].timestamp + sortedCheckBlocks[middleIndex + 1].timestamp) / 2;
+    }
+  })();
+  return medianTimestamp;
+};
 const _getNextBlockDifficulty = blocks => {
   const initialBlocks = (() => {
     const result = [];
@@ -2522,10 +2558,11 @@ const _getNextBlockDifficulty = blocks => {
       const checkBlock = checkBlocks[i];
       acc += checkBlock.difficulty;
     }
-    return acc / checkBlocksTimeDiff;
+    return acc / checkBlocks.length;
   })();
   const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, 2), 0.5);
-  const newDifficulty = Math.max(Math.round(averageDifficulty / accuracyFactor), 1);
+// console.log('accuracy', blocks[blocks.length - 1].timestamp, checkBlocks.length, checkBlocks.map(({timestamp}) => timestamp), checkBlocksTimeDiff, expectedTimeDiff, accuracyFactor);
+  const newDifficulty = Math.max(Math.round(averageDifficulty / accuracyFactor), 1000);
   return newDifficulty;
 };
 
@@ -2533,13 +2570,15 @@ let lastBlockTime = Date.now();
 let numHashes = 0;
 const doHash = () => new Promise((accept, reject) => {
   const version = BLOCK_VERSION;
-  const timestamp = Date.now();
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
   const height = topBlockHeight + 1;
   const difficulty = _getNextBlockDifficulty(blocks);
   const target = _getDifficultyTarget(difficulty);
-  const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp: Date.now()});
+  const minTimestamp = _getNextBlockMinTimestamp(blocks);
+  const now = Date.now();
+  const timestamp = Math.max(now, minTimestamp);
+  const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
   const privateKeyBuffer = NULL_PRIVATE_KEY;
   const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
@@ -3820,6 +3859,9 @@ const _mine = () => {
         if (error) {
           console.warn('add mined block error:', error);
         }
+
+        /* const difficulty = _getNextBlockDifficulty(blocks);
+        console.log('new difficulty', difficulty); */
       }
 
       mineImmediate = setImmediate(_mine);
