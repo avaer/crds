@@ -139,6 +139,7 @@ class Block {
     const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
     const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
     const _checkSufficientDifficulty = () => this.difficulty >= _getNextBlockDifficulty(blocks);
+    const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
         const message = this.messages[i];
@@ -174,6 +175,11 @@ class Block {
       return {
         status: 400,
         error: 'invalid difficulty claim',
+      };
+    } else if (!_checkMessagesCount()) {
+      return {
+        status: 400,
+        error: 'too many messages',
       };
     } else if (!_checkSufficientDifficulty()) {
       return {
@@ -2594,7 +2600,9 @@ const doHash = () => new Promise((accept, reject) => {
   const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
   const signatureString = signature.toString('base64');
   const coinbaseMessage = new Message(payload, signatureString);
-  const allMessages = mempool.messages.concat(coinbaseMessage);
+  const allMessages = mempool.messages
+    .slice(0, MESSAGES_PER_BLOCK_MAX - 1) // -1 for coinbase
+    .concat(coinbaseMessage);
   const allMessagesJson = allMessages
     .map(message => JSON.stringify(message))
     .join('\n');
