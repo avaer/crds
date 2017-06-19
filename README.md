@@ -40,6 +40,8 @@ The main architectureal difference is in the consensus rules and parameters, whi
 
 ## Technical discussion
 
+### Blocks
+
 Blocks are JSON files:
 
 ```
@@ -60,7 +62,11 @@ Blocks are JSON files:
 }
 ```
 
+### Hashes
+
 Hashes are `SHA-256` and cover all keys. The nonce is an arbitrary JSON number that lets you try for a hash under `0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff / difficulty`. A block with such a hash, a valid previous hash, and all messages valid, is itself accepted as valid and added to the chain.
+
+### Database
 
 To get a useful view of the blockchain such as address balances, we simply walk the blocks and deterministically build up an index database. This database is also JSON:
 
@@ -100,7 +106,43 @@ To get a useful view of the blockchain such as address balances, we simply walk 
 
 The database is immutable and proceeds in lockstep with blocks -- that is, when a new block comes in we chunch the numbers and tick the database to the next state. The database holds every piece of metadata we need to check integrity of the next block -- such as the balance of every address, the confirmed message signatures that still have a valid TTL (to prevent replays), and the unsettled charges that can be charged back by the payer.
 
-Note there is no concept of transaction outputs or scripts. The tradeoff is users can't invent their own crazy signing scheme without a software upgrade/fork, but we save memory and disk space and gain performance and simplicity. Consistency guarantees are identical to Bitcoin.
+### Mempool
+
+There is a memory pool ("mempool") which holds messages that are valid, but yet not confirmed by the network.
+
+The mempool is used as the data source for messages to include into blocks when mining, but it also serves to present a realtime view of the network to clients, without any confirmation delay. The tradeoff is that any message in the mempool has a chance of not being mined by the network and superceded by an incompatible message. Therefore balances and views are soft by default -- validating them requires looking at the confirmed blocks.
+
+Every message has a TTL (time to live) encoded as a block height and the message is only valid if mined by a block in that range. This allows the mempool to be automatically cleared of messages that were not attractive enough to be picked up by the network.
+
+### Mining
+
+Successfully mining a block involves computing a `SHA-256` hash of a block that is numerically less than some value. That value is driven by the consensus rules. The block contains an arbitrary JSON nonce so that mining can be retried until success.
+
+Blocks include a claim of difficulty and timestamp. Both are checked and factored into the hash. The required hash target for each block is computed from the average difficulty and timestamp range of the previous few blocks to maintain a constant rate of block creation. Timestamp accuracy is enforced by ensuring a block timestamp must be greater than the median timestamp of the previous few blocks.
+
+A CPU mining facility is provided.
+
+### Client/server peering
+
+Everything happens over plain HTTP, with JSON requests/responses. There is no request structure or batching (no JSON-RPC or such), just plain JSON. There's a websocket API for push notifications, which is a useful performance feature for mining and realtime network views (eliminates the need to poll). There is no encryption, but any part can trivially run over HTTP/2 TLS if desired.
+
+Like most blockchains, the architecture is a client/server model, where servers are peering nodes on the network, and clients submit queries and requests to servers (nodes) to interact with the blockchain. There are no privileged peers; each peer simply follows the rules of the network and invalid blocks/messages are ignored.
+
+Replication happens over the same client HTTP protocol. Messages and blocks are replicated, but each peer maintains their own database. Replicating the database would require trusting the source and there is no trust infrastructure for this.
+
+### Incentives
+
+There is a (relatively large) block size limit designed to disincentivize abusing the blockchain for arbitrary data storage. The problem therefore reduces to an incentive scheme.
+
+Messages are free to submit to miners (no "transaction fee"). However, each message has a hash, and this hash has a difficulty associated with it (number of leading zeroes). When mining a block, the target difficulty required for the block is reduced by the difficulty of the hash each included message. The amount of difficulty reduction is designed to be precisely the difficulty of mining the hash of the message.
+
+Therefore, although messages are "free" to submit to the network, miners are incentivized to include into blocks the messages with the greatest proof of work attached (because this work counts towards reducing the target difficulty they must achieve). Prioritization of messages in the blockchain is reduced to computation work on the sender's part.
+
+Spamming the network with useless messages (either by miners or third parties) is unprofitable: spam counts towards mining progress of the miner, not the spammer. Therefore a miner is incentivised to simply mine instead of spamming, and third parties waste resources by spamming -- resources that could be profitably spent mining. The hash functions for messages and blocks are the same for this reason.
+
+### Notes
+
+Note there is no concept of transaction outputs or scripts. The tradeoff is users can't invent their own signing scheme without a consensual software upgrade/fork, but we save memory and disk space and gain performance and simplicity. Consistency guarantees are the same as other blockchains, includiong bitcoin.
 
 Also note the multiple currencies and minters/minting tokens. Each additional currency has a name (such as `ZEOCOIN`), and a corresponding `:mint` token (such as `ZEOCOIN:mint`). This grants permission for posting `mint` transactions to create more tokens of a currency. Anyone can register a new currency provided the name isn't taken, which grants the currency's initial `:mint` token. The `:mint` token itself can be transferred to grant mint authority over the currency. All of this happens on the blockchain and is auditable by hand.
 
