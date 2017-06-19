@@ -233,7 +233,18 @@ class Message {
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (asset === CRD && quantity === COINBASE_QUANTITY) {
-                  return null;
+                  if (confirmingMessages.filter(confirmingMessage => {
+                    const payloadJson = JSON.parse(confirmingMessage.payload);
+                    const {type} = payloadJson;
+                    return type === 'coinbase';
+                  }).length <= 1) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'multiple coinbases',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
