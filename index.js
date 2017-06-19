@@ -139,7 +139,7 @@ class Block {
     };
     const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
     const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
-    const _checkSufficientDifficulty = () => this.difficulty >= Math.max(_getNextBlockDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY);
+    const _checkSufficientDifficulty = () => this.difficulty >= Math.max(_getNextBlockBaseDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY);
     const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
@@ -2551,7 +2551,7 @@ const _getNextBlockMinTimestamp = blocks => {
   })();
   return medianTimestamp;
 };
-const _getNextBlockDifficulty = blocks => {
+const _getNextBlockBaseDifficulty = blocks => {
   const initialBlocks = (() => {
     const result = [];
 
@@ -2594,7 +2594,7 @@ const _getNextBlockDifficulty = blocks => {
     return acc / checkBlocks.length;
   })();
   const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
-  const newDifficulty = Math.max(averageDifficulty, MIN_DIFFICULTY);
+  const newDifficulty = Math.max(averageDifficulty / accuracyFactor, MIN_DIFFICULTY);
   return newDifficulty;
 };
 const _getMessagesDifficulty = messages => {
@@ -2632,7 +2632,7 @@ const doHash = () => new Promise((accept, reject) => {
   const allMessagesJson = allMessages
     .map(message => JSON.stringify(message))
     .join('\n');
-  const baseDifficulty = _getNextBlockDifficulty(blocks);
+  const baseDifficulty = _getNextBlockBaseDifficulty(blocks);
   const bonusDifficulty = _getMessagesDifficulty(allMessages);
   const difficulty = Math.max(baseDifficulty - bonusDifficulty, MIN_DIFFICULTY);
   const target = _getDifficultyTarget(difficulty);
@@ -3908,7 +3908,7 @@ const _mine = () => {
           console.warn('add mined block error:', error);
         }
 
-        /* const difficulty = _getNextBlockDifficulty(blocks);
+        /* const difficulty = _getNextBlockBaseDifficulty(blocks);
         console.log('new difficulty', difficulty); */
       }
 
