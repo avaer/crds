@@ -26,6 +26,7 @@ const MESSAGE_TTL = 10;
 const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
 const HASH_WORK_TIME = 20;
+const MESSAGES_PER_BLOCK_MAX = 10000;
 const TARGET_BLOCKS = 10;
 const TARGET_TIME = 10 * 60 * 1000;
 const TARGET_SWAY_MAX = 1.25;
@@ -2477,16 +2478,24 @@ const _addBlock = (dbs, blocks, mempool, block) => {
   }
 };
 const _addMessage = (db, blocks, mempool, message) => {
-  if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
-    const error = message.verify(db, blocks, mempool);
-    if (!error) {
-      mempool.messages.push(message);
+  if (mempool.messages.length < MESSAGES_PER_BLOCK_MAX) {
+    if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
+      const error = message.verify(db, blocks, mempool);
 
-      api.emit('message', message);
+      if (!error) {
+        mempool.messages.push(message);
+
+        api.emit('message', message);
+      }
+      return error;
+    } else {
+      return null;
     }
-    return error;
   } else {
-    return null;
+    return {
+      status: 503,
+      error: 'mempool full',
+    };
   }
 };
 
