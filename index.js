@@ -44,7 +44,7 @@ const NULL_PUBLIC_KEY = eccrypto.getPublic(NULL_PRIVATE_KEY);
 const DEFAULT_DB = {
   balances: {},
   charges: [],
-  messageRevocations: [],
+  messageHashes: [],
   minters: {
     [CRD]: null,
   },
@@ -225,7 +225,7 @@ class Message {
       const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
       if (nextHeight >= startHeight && nextHeight < endHeight) {
-        if (!db.messageRevocations.some(signatures => signatures.includes(signature))) {
+        if (!db.messageHashes.some(signatures => signatures.includes(signature))) {
           switch (type) {
             case 'coinbase': {
               const {asset, quantity, address} = payloadJson;
@@ -2294,9 +2294,9 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   }
 
   // update message revocations
-  newDb.messageRevocations.push(block.messages.map(({signature}) => signature));
-  while (newDb.messageRevocations.length > MESSAGE_TTL) {
-    newDb.messageRevocations.shift();
+  newDb.messageHashes.push(block.messages.map(({signature}) => signature));
+  while (newDb.messageHashes.length > MESSAGE_TTL) {
+    newDb.messageHashes.shift();
   }
 
   const newMempool = mempool && {
