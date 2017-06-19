@@ -199,18 +199,19 @@ class Block {
   }
 }
 class Message {
-  constructor(payload, signature) {
+  constructor(payload, hash, signature) {
     this.payload = payload;
+    this.hash = hash;
     this.signature = signature;
   }
 
   static from(o) {
-    const {payload, signature} = o;
-    return new Message(payload, signature);
+    const {payload, hash, signature} = o;
+    return new Message(payload, hash, signature);
   }
 
   equals(message) {
-    return this.signature === message.signature;
+    return this.hash === message.hash;
   }
 
   verify(db, blocks, mempool = null, confirmingMessages = []) {
@@ -2601,11 +2602,7 @@ const _getMessagesDifficulty = messages => {
   let result = 0;
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    const messageHash = crypto.createHash('sha256') // XXX encode this in the messages directly
-      .update(new Buffer(message.signature, 'base64'))
-      .digest()
-      .toString('hex');
-    result += _getHashDifficulty(messageHash);
+    result += _getHashDifficulty(message.hash);
   }
   return result;
 };
@@ -2622,10 +2619,11 @@ const doHash = () => new Promise((accept, reject) => {
   const timestamp = Math.max(now, minTimestamp);
   const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp});
   const payloadHash = crypto.createHash('sha256').update(payload).digest();
+  const payloadHashString = payloadHash.toString('hex');
   const privateKeyBuffer = NULL_PRIVATE_KEY;
   const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
   const signatureString = signature.toString('base64');
-  const coinbaseMessage = new Message(payload, signatureString);
+  const coinbaseMessage = new Message(payload, payloadHashString, signatureString);
   const allMessages = mempool.messages
     .slice(0, MESSAGES_PER_BLOCK_MAX - 1) // -1 for coinbase
     .concat(coinbaseMessage);
@@ -3145,10 +3143,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, publicKey: publicKeyString, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
-
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3192,9 +3190,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'minter', address, asset, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3236,9 +3235,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'mint', asset, quantity, address, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3279,9 +3279,10 @@ const _listen = () => {
     const privateKeyBuffer = NULL_PRIVATE_KEY;
     const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3326,9 +3327,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'pack', srcAddress, dstAddress, asset, quantity, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3372,9 +3374,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'chargeback', chargeSignature, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3415,9 +3418,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'lock', address, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
@@ -3458,9 +3462,10 @@ const _listen = () => {
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'unlock', address, startHeight, timestamp, publicKey: publicKeyString});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
     const signatureString = signature.toString('base64');
-    const message = new Message(payload, signatureString);
+    const message = new Message(payload, payloadHashString, signatureString);
     const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
     const error = _addMessage(db, blocks, mempool, message);
     if (!error) {
