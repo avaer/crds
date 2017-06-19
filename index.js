@@ -27,6 +27,7 @@ const UNDO_HEIGHT = 10;
 const CHARGE_SETTLE_BLOCKS = 100;
 const HASH_WORK_TIME = 20;
 const MESSAGES_PER_BLOCK_MAX = 10000;
+const MIN_DIFFICULTY = 1000;
 const TARGET_BLOCKS = 10;
 const TARGET_TIME = 10 * 60 * 1000;
 const TARGET_SWAY_MAX = 1.25;
@@ -138,7 +139,7 @@ class Block {
     };
     const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
     const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
-    const _checkSufficientDifficulty = () => this.difficulty >= _getNextBlockDifficulty(blocks);
+    const _checkSufficientDifficulty = () => this.difficulty >= Math.max(_getNextBlockDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY);
     const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
@@ -859,8 +860,12 @@ let mempool = _clone(DEFAULT_MEMPOOL);
 let peers = [];
 const api = new EventEmitter();
 
-const _getDifficultyTarget = difficulty => bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16).divide(bigint(difficulty));
-const _getHashDifficulty = (hash, target) => bigint(hash).divide(target).valueOf();
+const maxTarget = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
+const _getDifficultyTarget = difficulty => maxTarget
+  .divide(bigint(Math.round(difficulty)));
+const _getHashDifficulty = hash => bigint(hash, 16)
+  .divide(maxTarget)
+  .valueOf();
 const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
 const initialDifficulty = 1e5;
 const initialTarget = _getDifficultyTarget(initialDifficulty);
@@ -2310,7 +2315,7 @@ const _commitSideChainBlock = (dbs, blocks, mempool, block, forkedBlock, sideCha
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
       const {hash} = block;
-      result += _getHashDifficulty(hash, target);
+      result += _getHashDifficulty(hash);
     }
     return result;
   };
@@ -2589,8 +2594,20 @@ const _getNextBlockDifficulty = blocks => {
     return acc / checkBlocks.length;
   })();
   const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
-  const newDifficulty = Math.max(Math.round(averageDifficulty / accuracyFactor), 1000);
+  const newDifficulty = Math.max(averageDifficulty, MIN_DIFFICULTY);
   return newDifficulty;
+};
+const _getMessagesDifficulty = messages => {
+  let result = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    const messageHash = crypto.createHash('sha256') // XXX encode this in the messages directly
+      .update(new Buffer(message.signature, 'base64'))
+      .digest()
+      .toString('hex');
+    result += _getHashDifficulty(messageHash);
+  }
+  return result;
 };
 
 let lastBlockTime = Date.now();
@@ -2600,8 +2617,6 @@ const doHash = () => new Promise((accept, reject) => {
   const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
   const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
   const height = topBlockHeight + 1;
-  const difficulty = _getNextBlockDifficulty(blocks);
-  const target = _getDifficultyTarget(difficulty);
   const minTimestamp = _getNextBlockMinTimestamp(blocks);
   const now = Date.now();
   const timestamp = Math.max(now, minTimestamp);
@@ -2617,6 +2632,10 @@ const doHash = () => new Promise((accept, reject) => {
   const allMessagesJson = allMessages
     .map(message => JSON.stringify(message))
     .join('\n');
+  const baseDifficulty = _getNextBlockDifficulty(blocks);
+  const bonusDifficulty = _getMessagesDifficulty(allMessages);
+  const difficulty = Math.max(baseDifficulty - bonusDifficulty, MIN_DIFFICULTY);
+  const target = _getDifficultyTarget(difficulty);
 
   const uint64Array = new Uint32Array(1);
   const hashRoot = (() => {
