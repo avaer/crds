@@ -502,13 +502,13 @@ class Message {
               }
             }
             case 'chargeback': {
-              const {chargeSignature} = payloadJson;
+              const {chargeHash} = payloadJson;
               const chargeMessage = (
                 !mempool ?
-                  _findConfirmedChargelikeMessage(blocks, chargeSignature)
+                  _findConfirmedChargelikeMessage(blocks, chargeHash)
                 :
-                  _findUnconfirmedChargelikeMessage(blocks, mempool, chargeSignature)
-              ) || _findConfirmingChargelikeMessage(confirmingMessages, chargeSignature);
+                  _findUnconfirmedChargelikeMessage(blocks, mempool, chargeHash)
+              ) || _findConfirmingChargelikeMessage(confirmingMessages, chargeHash);
 
               if (chargeMessage) {
                 const chargeMessagePayloadJson = JSON.parse(chargeMessage.payload);
@@ -851,6 +851,7 @@ const _isMintAsset = asset => /:mint$/.test(asset);
 const _roundToCents = n => Math.round(n * 100) / 100;
 const _decorateCharge = charge => {
   const result = JSON.parse(charge.payload);
+  result.hash = charge.hash;
   result.signature = charge.signature;
   return result;
 };
@@ -1515,11 +1516,11 @@ const _getUnconfirmedCharges = (db, mempool, address) => {
 
   return result;
 };
-const _findChargelikeBlockHeight = (blocks, chargeSignature) => {
+const _findChargelikeBlockHeight = (blocks, chargeHash) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
-    const chargeMessage = _findLocalChargelikeMessage(messages, chargeSignature);
+    const chargeMessage = _findLocalChargelikeMessage(messages, chargeHash);
 
     if (chargeMessage) {
       return block.height;
@@ -1527,24 +1528,24 @@ const _findChargelikeBlockHeight = (blocks, chargeSignature) => {
   }
   return -1;
 };
-const _findLocalChargelikeMessage = (messages, chargeSignature) => {
+const _findLocalChargelikeMessage = (messages, chargeHash) => {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    const {payload, signature} = message;
+    const {payload, hash} = message;
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
 
-    if ((type === 'charge' || type === 'pack') && signature === chargeSignature) {
+    if ((type === 'charge' || type === 'pack') && hash === chargeHash) {
       return message;
     }
   }
   return null;
 };
-const _findConfirmedChargelikeMessage = (blocks, chargeSignature) => {
+const _findConfirmedChargelikeMessage = (blocks, chargeHash) => {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i];
     const {messages} = block;
-    const message = _findLocalChargelikeMessage(messages, chargeSignature);
+    const message = _findLocalChargelikeMessage(messages, chargeHash);
 
     if (message) {
       return message;
@@ -1553,16 +1554,16 @@ const _findConfirmedChargelikeMessage = (blocks, chargeSignature) => {
 
   return null;
 };
-const _findUnconfirmedChargelikeMessage = (blocks, mempool, chargeSignature) => {
-  const confirmedChargelikeMessage = _findConfirmedChargelikeMessage(blocks, chargeSignature);
+const _findUnconfirmedChargelikeMessage = (blocks, mempool, chargeHash) => {
+  const confirmedChargelikeMessage = _findConfirmedChargelikeMessage(blocks, chargeHash);
 
   if (confirmedChargelikeMessage !== null) {
     return confirmedChargelikeMessage;
   } else {
-    return _findLocalChargelikeMessage(mempool.messages, chargeSignature);
+    return _findLocalChargelikeMessage(mempool.messages, chargeHash);
   }
 };
-const _findConfirmingChargelikeMessage = (confirmingMessages, chargeSignature) => _findLocalChargelikeMessage(confirmingMessages, chargeSignature);
+const _findConfirmingChargelikeMessage = (confirmingMessages, chargeHash) => _findLocalChargelikeMessage(confirmingMessages, chargeHash);
 class AddressAssetSpec {
   constructor(address, asset, balance, charges) {
     this.address = address;
@@ -1583,8 +1584,8 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
     return type === 'chargeback';
   });
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
-    const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findConfirmedChargelikeMessage(blocks, chargeSignature) || _findConfirmingChargelikeMessage(block.messages, chargeSignature);
+    const {chargeHash} = JSON.parse(chargeback.payload);
+    const chargeMessage = _findConfirmedChargelikeMessage(blocks, chargeHash) || _findConfirmingChargelikeMessage(block.messages, chargeHash);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -1698,8 +1699,8 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
   const charges = db.charges.concat(mempool.messages.filter(_messageTypeEqualsOneOf(['charge', 'pack'])));
   const chargebacks = mempool.messages.filter(_messageTypeEqualsOneOf(['chargeback']));
   const directlyInvalidatedCharges = chargebacks.map(chargeback => {
-    const {chargeSignature} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findUnconfirmedChargelikeMessage(blocks, mempool, chargeSignature);
+    const {chargeHash} = JSON.parse(chargeback.payload);
+    const chargeMessage = _findUnconfirmedChargelikeMessage(blocks, mempool, chargeHash);
     return chargeMessage || null;
   }).filter(chargeMessage => chargeMessage !== null);
 
@@ -2043,22 +2044,22 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   const newDb = _clone(db);
   _decorateDb(newDb);
 
-  const immediateChargebackSignatures = block.messages.map(message => {
+  const immediateChargebackHashes = block.messages.map(message => {
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
     if (type === 'chargeback') {
-      const {chargeSignature} = payloadJson;
-      return chargeSignature;
+      const {chargeHash} = payloadJson;
+      return chargeHash;
     } else {
       return null;
     }
-  }).filter(signature => signature !== null);
+  }).filter(hash => hash !== null);
 
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
     const message = block.messages[i];
-    const {payload, signature} = message;
+    const {payload, hash, signature} = message;
     const payloadJson = JSON.parse(payload);
     const {type} = payloadJson;
 
@@ -2109,7 +2110,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'charge') {
-      if (!immediateChargebackSignatures.includes(signature)) {
+      if (!immediateChargebackHashes.includes(hash)) {
         const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
         let srcAddressEntry = newDb.balances[srcAddress];
@@ -2163,7 +2164,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         }
       }
     } else if (type === 'pack') {
-      if (!immediateChargebackSignatures.includes(signature)) {
+      if (!immediateChargebackHashes.includes(hash)) {
         const {srcAddress, dstAddress, asset, quantity} = payloadJson;
 
         let srcAddressEntry = newDb.balances[srcAddress];
@@ -3368,11 +3369,11 @@ const _listen = () => {
     }
   });
 
-  const _createChargeback = ({chargeSignature, startHeight, timestamp, privateKey}) => {
+  const _createChargeback = ({chargeHash, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'chargeback', chargeSignature, publicKey: publicKeyString, startHeight, timestamp});
+    const payload = JSON.stringify({type: 'chargeback', chargeHash, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -3391,14 +3392,14 @@ const _listen = () => {
 
     if (
       body &&
-      typeof body.chargeSignature === 'string' &&
+      typeof body.chargeHash === 'string' &&
       typeof body.privateKey === 'string'
     ) {
-      const {chargeSignature, privateKey} = body;
+      const {chargeHash, privateKey} = body;
       const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       const timestamp = Date.now();
 
-      _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
+      _createChargeback({chargeHash, startHeight, timestamp, privateKey})
         .then(() => {
           res.json({ok: true});
         })
@@ -3771,11 +3772,11 @@ const _listen = () => {
         });
     },
     chargeback: args => {
-      const [chargeSignature, privateKey] = args;
+      const [chargeHash, privateKey] = args;
       const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       const timestamp = Date.now();
 
-      _createChargeback({chargeSignature, startHeight, timestamp, privateKey})
+      _createChargeback({chargeHash, startHeight, timestamp, privateKey})
         .then(() => {
           console.log('ok');
           process.stdout.write('> ');
