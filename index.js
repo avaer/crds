@@ -28,6 +28,8 @@ const CHARGE_SETTLE_BLOCKS = 100;
 const HASH_WORK_TIME = 20;
 const TARGET_BLOCKS = 10;
 const TARGET_TIME = 10 * 60 * 1000;
+const TARGET_SWAY_MAX = 1.25;
+const TARGET_SWAY_MIN = 0.75;
 const MIN_NUM_LIVE_PEERS = 10;
 const CRD = 'CRD';
 const COINBASE_QUANTITY = 1;
@@ -2560,8 +2562,7 @@ const _getNextBlockDifficulty = blocks => {
     }
     return acc / checkBlocks.length;
   })();
-  const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, 2), 0.5);
-// console.log('accuracy', blocks[blocks.length - 1].timestamp, checkBlocks.length, checkBlocks.map(({timestamp}) => timestamp), checkBlocksTimeDiff, expectedTimeDiff, accuracyFactor);
+  const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
   const newDifficulty = Math.max(Math.round(averageDifficulty / accuracyFactor), 1000);
   return newDifficulty;
 };
