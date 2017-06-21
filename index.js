@@ -830,6 +830,9 @@ class Peer {
   disable() {
     this._enabled = false;
 
+    if (this._connection) {
+      this._connection.close();
+    }
     if (this._reconnectTimeout) {
       clearTimeout(this._reconnectTimeout);
 
@@ -860,6 +863,7 @@ let blocks = [];
 let mempool = _clone(DEFAULT_MEMPOOL);
 let peers = [];
 const api = new EventEmitter();
+let live = true;
 
 const maxTarget = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
 const _getDifficultyTarget = difficulty => maxTarget
@@ -3076,13 +3080,20 @@ const _refreshLivePeers = () => {
   const enabledPeers = peers.filter(peer => peer.isEnabled());
   const disabledPeers = peers.filter(peer => !peer.isEnabled());
 
-  while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
-    const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
-    const peer = disabledPeers[disabledPeerIndex];
-    peer.enable();
+  if (live) {
+    while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
+      const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
+      const peer = disabledPeers[disabledPeerIndex];
+      peer.enable();
 
-    disabledPeers.splice(disabledPeerIndex, 1);
-    enabledPeers.push(peer);
+      disabledPeers.splice(disabledPeerIndex, 1);
+      enabledPeers.push(peer);
+    }
+  } else {
+    while (enabledPeers.length > 0) {
+      const peer = enabledPeers.pop();
+      peer.disable();
+    }
   }
 };
 
@@ -3891,8 +3902,15 @@ const _listen = () => {
   });
   replHistory(r, path.join(dataDirectory, 'history.txt'));
   r.on('exit', () => {
-    console.log();
-    process.exit(0);
+    live = false;
+
+    server.close();
+    _stopMine();
+    _refreshLivePeers();
+
+    process.on('SIGINT', () => {
+      console.log('ignoring SIGINT');
+    });
   });
 };
 
