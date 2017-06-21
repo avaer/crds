@@ -34,7 +34,7 @@ const TARGET_SWAY_MAX = 1.25;
 const TARGET_SWAY_MIN = 0.75;
 const MIN_NUM_LIVE_PEERS = 10;
 const CRD = 'CRD';
-const COINBASE_QUANTITY = 1;
+const COINBASE_QUANTITY = 100;
 const NULL_PRIVATE_KEY = (() => {
   const result = Buffer.alloc(32);
   result[0] = 0xFF;
