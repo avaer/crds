@@ -269,7 +269,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
-                if (quantity > 0 && _roundToCents(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
+                if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
                   if (!mempool) {
                     if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
                       return null;
@@ -340,7 +340,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                if (quantity > 0 && _roundToCents(quantity) === quantity) {
+                if (quantity > 0 && Math.floor(quantity) === quantity) {
                   const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
 
                   if (minter === address) {
@@ -373,8 +373,8 @@ class Message {
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (_isValidAsset(srcAsset) && (dstAsset === null || _isValidAsset(dstAsset))) {
                   if (
-                    (srcQuantity > 0 && _roundToCents(srcQuantity) === srcQuantity) &&
-                    ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && _roundToCents(dstQuantity) === dstQuantity))
+                    (srcQuantity > 0 && Math.floor(srcQuantity) === srcQuantity) &&
+                    ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && Math.floor(dstQuantity) === dstQuantity))
                   ) {
                     if (!mempool) {
                       if (
@@ -448,7 +448,7 @@ class Message {
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === dstAddress) {
                 if (_isValidAsset(asset)) {
-                  if (quantity > 0 && _roundToCents(quantity) === quantity) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
                     if (!mempool) {
                       if (!_getConfirmedLocked(db, srcAddress)) {
                         if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
@@ -848,7 +848,6 @@ const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('s
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
 const _isValidAsset = asset => /^[A-Z]+$/.test(asset);
 const _isMintAsset = asset => /:mint$/.test(asset);
-const _roundToCents = n => Math.round(n * 100) / 100;
 const _decorateCharge = charge => {
   const result = JSON.parse(charge.payload);
   result.hash = charge.hash;
@@ -902,7 +901,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (assetEntry === undefined) {
         assetEntry = 0;
       }
-      addressEntry[asset] = _roundToCents(assetEntry + quantity);
+      addressEntry[asset] = assetEntry + quantity;
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
@@ -915,7 +914,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
+      srcAddressEntry[asset] = srcAssetEntry - quantity;
 
       let dstAddressEntry = result[dstAddress];
       if (dstAddressEntry === undefined){
@@ -926,7 +925,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'charge') {
       const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
@@ -939,7 +938,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      srcAddressEntry[srcAsset] = _roundToCents(srcAssetEntry - srcQuantity);
+      srcAddressEntry[srcAsset] = srcAssetEntry - srcQuantity;
 
       let dstAddressEntry = result[dstAddress];
       if (dstAddressEntry === undefined){
@@ -950,7 +949,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      dstAddressEntry[srcAsset] = _roundToCents(dstAssetEntry + srcQuantity);
+      dstAddressEntry[srcAsset] = dstAssetEntry + srcQuantity;
 
       if (dstAsset) {
         let dstAddressEntry = result[dstAddress];
@@ -962,7 +961,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        dstAddressEntry[dstAsset] = _roundToCents(dstAssetEntry - dstQuantity);
+        dstAddressEntry[dstAsset] = dstAssetEntry - dstQuantity;
 
         let srcAddressEntry = result[srcAddress];
         if (srcAddressEntry === undefined) {
@@ -973,7 +972,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        srcAddressEntry[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
+        srcAddressEntry[dstAsset] = srcAssetEntry + dstQuantity;
       }
     } else if (type === 'pack') {
       const {srcAddress, dstAddress, asset, quantity} = payloadJson;
@@ -987,7 +986,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      srcAddressEntry[asset] = _roundToCents(srcAssetEntry - quantity);
+      srcAddressEntry[asset] = srcAssetEntry - quantity;
 
       let dstAddressEntry = result[dstAddress];
       if (dstAddressEntry === undefined){
@@ -998,7 +997,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      dstAddressEntry[asset] = _roundToCents(dstAssetEntry + quantity);
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'mint') {
       const {address, asset, quantity} = payloadJson;
 
@@ -1011,7 +1010,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (assetEntry === undefined) {
         assetEntry = 0;
       }
-      assetEntry = _roundToCents(assetEntry + quantity);
+      assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'minter') {
       const {address, asset} = payloadJson;
@@ -1026,7 +1025,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       if (mintAssetEntry === undefined) {
         mintAssetEntry = 0;
       }
-      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+      mintAssetEntry = mintAssetEntry + 1;
       addressEntry[mintAsset] = mintAssetEntry;
     }
   }
@@ -1049,7 +1048,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[asset] = _roundToCents(assetEntry + quantity);
+        result[asset] = assetEntry + quantity;
       }
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
@@ -1059,7 +1058,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[asset] = _roundToCents(srcAssetEntry - quantity);
+        result[asset] = srcAssetEntry - quantity;
       }
 
       if (dstAddress === address) {
@@ -1067,7 +1066,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[asset] = _roundToCents(dstAssetEntry + quantity);
+        result[asset] = dstAssetEntry + quantity;
       }
     } else if (type === 'charge') {
       const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
@@ -1077,14 +1076,14 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[srcAsset] = _roundToCents(srcAssetEntry - srcQuantity);
+        result[srcAsset] = srcAssetEntry - srcQuantity;
       }
       if (dstAddress === address) {
         let dstAssetEntry = result[srcAsset];
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[srcAsset] = _roundToCents(dstAssetEntry + srcQuantity);
+        result[srcAsset] = dstAssetEntry + srcQuantity;
       }
 
       if (dstAsset) {
@@ -1093,14 +1092,14 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
           if (dstAssetEntry === undefined) {
             dstAssetEntry = 0;
           }
-          result[dstAsset] = _roundToCents(dstAssetEntry - dstQuantity);
+          result[dstAsset] = dstAssetEntry - dstQuantity;
         }
         if (srcAddress === address) {
           let srcAssetEntry = result[dstAsset];
           if (srcAssetEntry === undefined) {
             srcAssetEntry = 0;
           }
-          result[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
+          result[dstAsset] = srcAssetEntry + dstQuantity;
         }
       }
     } else if (type === 'pack') {
@@ -1111,14 +1110,14 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[asset] = _roundToCents(srcAssetEntry - quantity);
+        result[asset] = srcAssetEntry - quantity;
       }
       if (dstAddress === address) {
         let dstAssetEntry = result[asset];
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[asset] = _roundToCents(dstAssetEntry + quantity);
+        result[asset] = dstAssetEntry + quantity;
       }
     } else if (type === 'mint') {
       const {address: localAddress, asset, quantity} = payloadJson;
@@ -1128,7 +1127,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        assetEntry = _roundToCents(assetEntry + quantity);
+        assetEntry = assetEntry + quantity;
         result[asset] = assetEntry;
       }
     } else if (type === 'minter') {
@@ -1141,7 +1140,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         if (mintAssetEntry === undefined) {
           mintAssetEntry = 0;
         }
-        mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+        mintAssetEntry = mintAssetEntry + 1;
         result[mintAsset] = mintAssetEntry;
       }
     }
@@ -1161,17 +1160,17 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
       const {asset: localAsset, quantity, address: localAddress} = payloadJson;
 
       if (localAsset === asset && localAddress === address) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
     } else if (type === 'send') {
       const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
-          result = _roundToCents(result - quantity);
+          result = result - quantity;
         }
         if (dstAddress === address) {
-          result = _roundToCents(result + quantity);
+          result = result + quantity;
         }
       }
     } else if (type === 'charge') {
@@ -1179,19 +1178,19 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 
       if (srcAsset === asset) {
         if (srcAddress === address) {
-          result = _roundToCents(result - srcQuantity);
+          result = result - srcQuantity;
         }
         if (dstAddress === address) {
-          result = _roundToCents(result + srcQuantity);
+          result = result + srcQuantity;
         }
       }
       if (dstAsset) {
         if (dstAsset === asset) {
           if (dstAddress === address) {
-            result = _roundToCents(result - dstQuantity);
+            result = result - dstQuantity;
           }
           if (srcAddress === address) {
-            result = _roundToCents(result + dstQuantity);
+            result = result + dstQuantity;
           }
         }
       }
@@ -1200,24 +1199,24 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 
       if (localAsset === asset) {
         if (srcAddress === address) {
-          result = _roundToCents(result - quantity);
+          result = result - quantity;
         }
         if (dstAddress === address) {
-          result = _roundToCents(result + quantity);
+          result = result + quantity;
         }
       }
     } else if (type === 'mint') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
     } else if (type === 'minter') {
       const {address: localAddress, asset: localAsset} = payloadJson;
       const mintAsset = localAsset + ':mint';
 
       if (localAddress === address && mintAsset === asset) {
-        result = _roundToCents(result + 1);
+        result = result + 1;
       }
     }
   }
@@ -1240,7 +1239,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[asset] = _roundToCents(assetEntry + quantity);
+        result[asset] = assetEntry + quantity;
       }
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
@@ -1250,7 +1249,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[asset] = _roundToCents(srcAssetEntry - quantity);
+        result[asset] = srcAssetEntry - quantity;
       }
 
       if (dstAddress === address) {
@@ -1258,7 +1257,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[asset] = _roundToCents(dstAssetEntry + quantity);
+        result[asset] = dstAssetEntry + quantity;
       }
     } else if (type === 'charge') {
       const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
@@ -1268,14 +1267,14 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[srcAsset] = _roundToCents(srcAssetEntry - srcQuantity);
+        result[srcAsset] = srcAssetEntry - srcQuantity;
       }
       if (dstAddress === address) {
         let dstAssetEntry = result[srcAsset];
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[srcAsset] = _roundToCents(dstAssetEntry + srcQuantity);
+        result[srcAsset] = dstAssetEntry + srcQuantity;
       }
 
       if (dstAsset) {
@@ -1284,14 +1283,14 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
           if (dstAssetEntry === undefined) {
             dstAssetEntry = 0;
           }
-          result[dstAsset] = _roundToCents(dstAssetEntry - dstQuantity);
+          result[dstAsset] = dstAssetEntry - dstQuantity;
         }
         if (srcAddress === address) {
           let srcAssetEntry = result[dstAsset];
           if (srcAssetEntry === undefined) {
             srcAssetEntry = 0;
           }
-          result[dstAsset] = _roundToCents(srcAssetEntry + dstQuantity);
+          result[dstAsset] = srcAssetEntry + dstQuantity;
         }
       }
     } else if (type === 'pack') {
@@ -1302,14 +1301,14 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[asset] = _roundToCents(srcAssetEntry - quantity);
+        result[asset] = srcAssetEntry - quantity;
       }
       if (dstAddress === address) {
         let dstAssetEntry = result[asset];
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[asset] = _roundToCents(dstAssetEntry + quantity);
+        result[asset] = dstAssetEntry + quantity;
       }
     } else if (type === 'mint') {
       const {address: localAddress, asset, quantity} = payloadJson;
@@ -1319,7 +1318,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[asset] = _roundToCents(assetEntry + quantity);
+        result[asset] = assetEntry + quantity;
       }
     } else if (type === 'minter') {
       const {address: localAddress, asset} = payloadJson;
@@ -1330,7 +1329,7 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (mintAssetEntry === undefined) {
           mintAssetEntry = 0;
         }
-        mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+        mintAssetEntry = mintAssetEntry + 1;
         result[mintAsset] = mintAssetEntry;
       }
     }
@@ -1346,14 +1345,14 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      result[srcAsset] = _roundToCents(srcAssetEntry + srcQuantity);
+      result[srcAsset] = srcAssetEntry + srcQuantity;
     }
     if (dstAddress === address) {
       let dstAssetEntry = result[srcAsset];
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      result[srcAsset] = _roundToCents(dstAssetEntry - srcQuantity);
+      result[srcAsset] = dstAssetEntry - srcQuantity;
     }
 
     if (dstAsset) {
@@ -1362,14 +1361,14 @@ const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[dstAsset] = _roundToCents(dstAssetEntry + dstQuantity);
+        result[dstAsset] = dstAssetEntry + dstQuantity;
       }
       if (srcAddress === address) {
         let srcAssetEntry = result[dstAsset];
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[dstAsset] = _roundToCents(srcAssetEntry - dstQuantity);
+        result[dstAsset] = srcAssetEntry - dstQuantity;
       }
     }
   }
@@ -1388,57 +1387,57 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
       const {asset: localAsset, quantity, address: localAddress} = payloadJson;
 
       if (localAsset === asset && localAddress === address) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
     } else if (type === 'send') {
       const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
-          result = _roundToCents(result - quantity);
+          result = result - quantity;
         }
         if (dstAddress === address) {
-          result = _roundToCents(result + quantity);
+          result = result + quantity;
         }
       }
     } else if (type === 'charge') {
       const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
 
       if (srcAddress === address && srcAsset === asset) {
-        result = _roundToCents(result - srcQuantity);
+        result = result - srcQuantity;
       }
       if (dstAddress === address && srcAsset === asset) {
-        result = _roundToCents(result + srcQuantity);
+        result = result + srcQuantity;
       }
       if (dstAsset) {
         if (dstAddress === address && dstAsset === asset) {
-          result = _roundToCents(result - dstQuantity);
+          result = result - dstQuantity;
         }
         if (srcAddress === address && dstAsset === asset) {
-          result = _roundToCents(result + dstQuantity);
+          result = result + dstQuantity;
         }
       }
     } else if (type === 'pack') {
       const {srcAddress, dstAddress, asset: localAsset, quantity} = payloadJson;
 
       if (srcAddress === address && localAsset === asset) {
-        result = _roundToCents(result - quantity);
+        result = result - quantity;
       }
       if (dstAddress === address && localAsset === asset) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
     } else if (type === 'mint') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
     } else if (type === 'minter') {
       const {address: localAddress, asset: localAsset} = payloadJson;
       const mintAsset = localAsset + ':mint';
 
       if (localAddress === address && mintAsset === asset) {
-        result = _roundToCents(result + 1);
+        result = result + 1;
       }
     }
   }
@@ -1450,10 +1449,10 @@ const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
 
     if (a === asset) {
       if (srcAddress === address) {
-        result = _roundToCents(result + quantity);
+        result = result + quantity;
       }
       if (dstAddress === address) {
-        result = _roundToCents(result - quantity);
+        result = result - quantity;
       }
     }
   }
@@ -1628,11 +1627,11 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
           let applied = false;
 
           if (srcAddress === address) {
-            balance = _roundToCents(balance - quantity);
+            balance = balance - quantity;
             applied = true;
           }
           if (dstAddress === address) {
-            balance = _roundToCents(balance + quantity);
+            balance = balance + quantity;
             applied = true;
           }
 
@@ -1675,10 +1674,10 @@ const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
         const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
 
         if (srcAddress === address) {
-          balance = _roundToCents(balance + quantity);
+          balance = balance + quantity;
         }
         if (dstAddress === address) {
-          balance = _roundToCents(balance - quantity);
+          balance = balance - quantity;
         }
 
         result.push(charge);
@@ -1743,11 +1742,11 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
           let applied = false;
 
           if (srcAddress === address) {
-            balance = _roundToCents(balance - quantity);
+            balance = balance - quantity;
             applied = true;
           }
           if (dstAddress === address) {
-            balance = _roundToCents(balance + quantity);
+            balance = balance + quantity;
             applied = true;
           }
 
@@ -1790,10 +1789,10 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
         const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
 
         if (srcAddress === address) {
-          balance = _roundToCents(balance + quantity);
+          balance = balance + quantity;
         }
         if (dstAddress === address) {
-          balance = _roundToCents(balance - quantity);
+          balance = balance - quantity;
         }
 
         result.push(charge);
@@ -2075,7 +2074,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (assetEntry === undefined) {
         assetEntry = 0;
       }
-      assetEntry = _roundToCents(assetEntry + quantity);
+      assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
@@ -2089,7 +2088,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
+      srcAssetEntry = srcAssetEntry - quantity;
       srcAddressEntry[asset] = srcAssetEntry;
 
       let dstAddressEntry = newDb.balances[dstAddress];
@@ -2101,7 +2100,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
+      dstAssetEntry = dstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAssetEntry;
 
       const match = asset.match(/^(.+):mint$/);
@@ -2122,7 +2121,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        srcAssetEntry = _roundToCents(srcAssetEntry - srcQuantity);
+        srcAssetEntry = srcAssetEntry - srcQuantity;
         srcAddressEntry[srcAsset] = srcAssetEntry;
 
         let dstAddressEntry = newDb.balances[dstAddress];
@@ -2134,7 +2133,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        dstAssetEntry = _roundToCents(dstAssetEntry + srcQuantity);
+        dstAssetEntry = dstAssetEntry + srcQuantity;
         dstAddressEntry[srcAsset] = dstAssetEntry;
 
         if (dstAsset) {
@@ -2147,7 +2146,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
           if (dstAssetEntry === undefined) {
             dstAssetEntry = 0;
           }
-          dstAssetEntry = _roundToCents(dstAssetEntry - dstQuantity);
+          dstAssetEntry = dstAssetEntry - dstQuantity;
           dstAddressEntry[dstAsset] = dstAssetEntry;
 
           let srcAddressEntry = newDb.balances[srcAddress];
@@ -2159,7 +2158,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
           if (srcAssetEntry === undefined) {
             srcAssetEntry = 0;
           }
-          srcAssetEntry = _roundToCents(srcAssetEntry + dstQuantity);
+          srcAssetEntry = srcAssetEntry + dstQuantity;
           srcAddressEntry[dstAsset] = srcAssetEntry;
         }
       }
@@ -2176,7 +2175,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
+        srcAssetEntry = srcAssetEntry - quantity;
         srcAddressEntry[asset] = srcAssetEntry;
 
         let dstAddressEntry = newDb.balances[dstAddress];
@@ -2188,7 +2187,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
+        dstAssetEntry = dstAssetEntry + quantity;
         dstAddressEntry[asset] = dstAssetEntry;
       }
     } else if (type === 'mint') {
@@ -2203,7 +2202,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (assetEntry === undefined) {
         assetEntry = 0;
       }
-      assetEntry = _roundToCents(assetEntry + quantity);
+      assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'minter') {
       const {asset, address} = payloadJson;
@@ -2218,7 +2217,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (mintAssetEntry === undefined) {
         mintAssetEntry = 0;
       }
-      mintAssetEntry = _roundToCents(mintAssetEntry + 1);
+      mintAssetEntry = mintAssetEntry + 1;
       addressEntry[mintAsset] = mintAssetEntry;
 
       newDb.minters[asset] = address;
@@ -2274,7 +2273,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (srcAssetEntry === undefined) {
         srcAssetEntry = 0;
       }
-      srcAssetEntry = _roundToCents(srcAssetEntry - quantity);
+      srcAssetEntry = srcAssetEntry - quantity;
       srcAddressEntry[asset] = srcAssetEntry;
 
       let dstAddressEntry = newDb.balances[dstAddress];
@@ -2286,7 +2285,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       if (dstAssetEntry === undefined) {
         dstAssetEntry = 0;
       }
-      dstAssetEntry = _roundToCents(dstAssetEntry + quantity);
+      dstAssetEntry = dstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAssetEntry;
 
       newDb.charges.splice(newDb.charges.indexOf(charge), 1);
