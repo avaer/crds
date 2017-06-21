@@ -3098,56 +3098,6 @@ const _refreshLivePeers = () => {
 };
 
 const _listen = () => {
-  const app = express();
-
-  const cors = (req, res, next) => {
-    res.set('Access-Control-Allow-Origin', req.get('Origin'));
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.set('Access-Control-Allow-Credentials', true);
-
-    next();
-  };
-  app.options('*', cors, (req, res, next) => {
-    res.send();
-  });
-
-  app.get('/balances/:address', cors, (req, res, next) => {
-    const {address} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balances = _getConfirmedBalances(db, address);
-    res.json(balances);
-  });
-  app.get('/balance/:address/:asset', cors, (req, res, next) => {
-    const {address, asset} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getConfirmedBalance(db, address, asset);
-    res.json(balance);
-  });
-  app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
-    const {address} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balances = _getUnconfirmedUnsettledBalances(db, mempool, address);
-    res.json(balances);
-  });
-  app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
-    const {address, asset} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
-    res.json(balance);
-  });
-  app.get('/charges/:address', cors, (req, res, next) => {
-    const {address} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getConfirmedCharges(db, address).map(charge => _decorateCharge(charge));
-    res.json(charges);
-  });
-  app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
-    const {address} = req.params;
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => _decorateCharge(charge));
-    res.json(charges);
-  });
-
   const _createSend = ({asset, quantity, srcAddress, dstAddress, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3166,35 +3116,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createSend', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.asset === 'string' &&
-      typeof body.quantity === 'number' &&
-      typeof body.srcAddress === 'string' &&
-      typeof body.dstAddress === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {asset, quantity, srcAddress, dstAddress, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createSend({asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createMinter = ({address, asset, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3213,33 +3134,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMinter', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.address === 'string' &&
-      typeof body.asset === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {address, asset, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createMinter({address, asset, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createMint = ({asset, quantity, address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3258,34 +3152,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createMint', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.asset === 'string' &&
-      typeof body.quantity === 'number' &&
-      typeof body.address === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {asset, quantity, address, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createMint({asset, quantity, address, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createCharge = ({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp}) => {
     const privateKeyBuffer = NULL_PRIVATE_KEY;
     const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp});
@@ -3302,36 +3168,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createCharge', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.srcAddress === 'string' &&
-      typeof body.dstAddress === 'string' &&
-      typeof body.srcAsset === 'string' &&
-      typeof body.srcQuantity === 'number' &&
-      (body.dstAsset === null || (typeof body.dstAsset === 'string')) &&
-      typeof body.dstQuantity === 'number'
-    ) {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createPack = ({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3350,35 +3186,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createPack', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.srcAddress === 'string' &&
-      typeof body.dstAddress === 'string' &&
-      typeof body.asset === 'string' &&
-      typeof body.quantity === 'number' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {srcAddress, dstAddress, asset, quantity, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createPack({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createChargeback = ({chargeHash, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3397,32 +3204,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createChargeback', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.chargeHash === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {chargeHash, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createChargeback({chargeHash, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createLock = ({address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3441,32 +3222,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createLock', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
-
-    if (
-      body &&
-      typeof body.address === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {address, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createLock({address, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
-
   const _createUnlock = ({address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3485,433 +3240,695 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  app.post('/createUnlock', cors, bodyParserJson, (req, res, next) => {
-    const {body} = req;
 
-    if (
-      body &&
-      typeof body.address === 'string' &&
-      typeof body.privateKey === 'string'
-    ) {
-      const {address, privateKey} = body;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
+  const _requestServer = () => new Promise((accept, reject) => {
+    const app = express();
 
-      _createUnlock({address, startHeight, timestamp, privateKey})
-        .then(() => {
-          res.json({ok: true});
-        })
-        .catch(err => {
-          res.status(err.status || 500);
-          res.json({error: err.stack});
-        });
-    } else {
-      res.status(400);
-      res.send({error: 'invalid parameters'});
-    }
-  });
+    const cors = (req, res, next) => {
+      res.set('Access-Control-Allow-Origin', req.get('Origin'));
+      res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.set('Access-Control-Allow-Credentials', true);
 
-  app.get('/blocks/:height', cors, (req, res, next) => {
-    const {height: heightStirng} = req.params;
-    const height = parseInt(heightStirng, 10);
+      next();
+    };
+    app.options('*', cors, (req, res, next) => {
+      res.send();
+    });
 
-    if (!isNaN(height)) {
-      const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+    app.get('/balances/:address', cors, (req, res, next) => {
+      const {address} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const balances = _getConfirmedBalances(db, address);
+      res.json(balances);
+    });
+    app.get('/balance/:address/:asset', cors, (req, res, next) => {
+      const {address, asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const balance = _getConfirmedBalance(db, address, asset);
+      res.json(balance);
+    });
+    app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
+      const {address} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const balances = _getUnconfirmedUnsettledBalances(db, mempool, address);
+      res.json(balances);
+    });
+    app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
+      const {address, asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
+      res.json(balance);
+    });
+    app.get('/charges/:address', cors, (req, res, next) => {
+      const {address} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const charges = _getConfirmedCharges(db, address).map(charge => _decorateCharge(charge));
+      res.json(charges);
+    });
+    app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
+      const {address} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => _decorateCharge(charge));
+      res.json(charges);
+    });
+    app.post('/createSend', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
 
-      if (height >= 1 && height <= topBlockHeight) {
-        const firstBlockHeight = blocks[0].height;
+      if (
+        body &&
+        typeof body.asset === 'string' &&
+        typeof body.quantity === 'number' &&
+        typeof body.srcAddress === 'string' &&
+        typeof body.dstAddress === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {asset, quantity, srcAddress, dstAddress, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
 
-        if (height >= firstBlockHeight) {
-          const blockIndex = height - firstBlockHeight;
-          const block = blocks[blockIndex];
-          res.type('application/json');
-          res.send(JSON.stringify(block, null, 2));
+        _createSend({asset, quantity, srcAddress, dstAddress, timestamp, startHeight, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createMinter', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.address === 'string' &&
+        typeof body.asset === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {address, asset, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createMinter({address, asset, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createMint', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.asset === 'string' &&
+        typeof body.quantity === 'number' &&
+        typeof body.address === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {asset, quantity, address, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createMint({asset, quantity, address, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createCharge', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.srcAddress === 'string' &&
+        typeof body.dstAddress === 'string' &&
+        typeof body.srcAsset === 'string' &&
+        typeof body.srcQuantity === 'number' &&
+        (body.dstAsset === null || (typeof body.dstAsset === 'string')) &&
+        typeof body.dstQuantity === 'number'
+      ) {
+        const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createPack', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.srcAddress === 'string' &&
+        typeof body.dstAddress === 'string' &&
+        typeof body.asset === 'string' &&
+        typeof body.quantity === 'number' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {srcAddress, dstAddress, asset, quantity, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createPack({srcAddress, dstAddress, asset, quantity, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createChargeback', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.chargeHash === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {chargeHash, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createChargeback({chargeHash, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createLock', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.address === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {address, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createLock({address, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+    app.post('/createUnlock', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (
+        body &&
+        typeof body.address === 'string' &&
+        typeof body.privateKey === 'string'
+      ) {
+        const {address, privateKey} = body;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createUnlock({address, startHeight, timestamp, privateKey})
+          .then(() => {
+            res.json({ok: true});
+          })
+          .catch(err => {
+            res.status(err.status || 500);
+            res.json({error: err.stack});
+          });
+      } else {
+        res.status(400);
+        res.send({error: 'invalid parameters'});
+      }
+    });
+
+    app.get('/blocks/:height', cors, (req, res, next) => {
+      const {height: heightStirng} = req.params;
+      const height = parseInt(heightStirng, 10);
+
+      if (!isNaN(height)) {
+        const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+
+        if (height >= 1 && height <= topBlockHeight) {
+          const firstBlockHeight = blocks[0].height;
+
+          if (height >= firstBlockHeight) {
+            const blockIndex = height - firstBlockHeight;
+            const block = blocks[blockIndex];
+            res.type('application/json');
+            res.send(JSON.stringify(block, null, 2));
+          } else {
+            const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
+            res.type('application/json');
+            rs.pipe(res);
+            rs.on('error', err => {
+              console.warn(err);
+
+              res.status(500);
+              res.send(err.stack);
+            });
+          }
         } else {
-          const rs = fs.createReadStream(path.join(blocksDataPath, `block-${height}.json`));
-          res.type('application/json');
-          rs.pipe(res);
-          rs.on('error', err => {
-            console.warn(err);
-
-            res.status(500);
-            res.send(err.stack);
+          res.status(404);
+          res.json({
+            error: 'height out of range',
           });
         }
       } else {
-        res.status(404);
+        res.status(400);
         res.json({
-          error: 'height out of range',
+          error: 'invalid height',
         });
       }
-    } else {
-      res.status(400);
-      res.json({
-        error: 'invalid height',
-      });
-    }
-  });
-  /* app.get('/blockcount', cors, (req, res, next) => {
-    const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-
-    res.json({
-      blockcount,
     });
-  }); */
-  app.get('/blockcache', cors, (req, res, next) => {
-    res.json(blocks);
-  });
-  app.get('/mempool', cors, (req, res, next) => {
-    res.json(mempool);
-  });
-  app.get('/peers', cors, (req, res, next) => {
-    const urls = peers.map(({url}) => url);
-
-    res.json(urls);
-  });
-
-  _refreshLivePeers();
-
-  const server = http.createServer(app)
-  const wss = new ws.Server({
-    noServer: true,
-  });
-  const connections = [];
-  wss.on('connection', c => {
-    const {url} = c.upgradeReq;
-
-    if (url === '/listen') {
-      connections.push(c);
-
-      c.on('close', () => {
-        connections.splice(connections.indexOf(c), 1);
-      });
-    } else {
-      c.close();
-    }
-  });
-  server.on('upgrade', (req, socket, head) => {
-    wss.handleUpgrade(req, socket, head, c => {
-      c.upgradeReq = req;
-
-      wss.emit('connection', c);
-    });
-  });
-  server.listen(port, host);
-
-  api.on('block', block => {
-    const e = {
-      type: 'block',
-      block: block,
-    };
-    const es = JSON.stringify(e);
-
-    for (let i = 0; i < connections.length; i++) {
-      const connection = connections[i];
-      connection.send(es);
-    }
-  });
-  api.on('message', message => {
-    const e = {
-      type: 'message',
-      message: message,
-    };
-    const es = JSON.stringify(e);
-
-    for (let i = 0; i < connections.length; i++) {
-      const connection = connections[i];
-      connection.send(es);
-    }
-  });
-  api.on('peer', peer => {
-    const e = {
-      type: 'peer',
-      peer: peer,
-    };
-    const es = JSON.stringify(e);
-
-    for (let i = 0; i < connections.length; i++) {
-      const connection = connections[i];
-      connection.send(es);
-    }
-  });
-
-  const commands = {
-    db: args => {
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      console.log(JSON.stringify(db, null, 2));
-      process.stdout.write('> ');
-    },
-    blockcount: args => {
+    /* app.get('/blockcount', cors, (req, res, next) => {
       const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-      console.log(JSON.stringify(blockcount, null, 2));
-      process.stdout.write('> ');
-    },
-    blockcache: args => {
-      console.log(JSON.stringify(blocks, null, 2));
-      process.stdout.write('> ');
-    },
-    mempool: args => {
-      console.log(JSON.stringify(mempool.messages, null, 2));
-      process.stdout.write('> ');
-    },
-    getaddress: args => {
-      const [privateKey] = args;
-      const privateKeyBuffer = new Buffer(privateKey, 'base64');
-      const address = _getAddressFromPrivateKey(privateKeyBuffer);
-      console.log(address);
-      process.stdout.write('> ');
-    },
-    balance: args => {
-      const [address, asset] = args;
 
-      if (address && asset) {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const balance = _getUnconfirmedBalance(db, mempool, address, asset);
-        console.log(JSON.stringify(balance, null, 2));
-        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-        process.stdout.write('> ')
-      } else if (address) {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const balances = _getUnconfirmedBalances(db, mempool, address);
-        console.log(JSON.stringify(balances, null, 2));
-        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-        process.stdout.write('> ');
+      res.json({
+        blockcount,
+      });
+    }); */
+    app.get('/blockcache', cors, (req, res, next) => {
+      res.json(blocks);
+    });
+    app.get('/mempool', cors, (req, res, next) => {
+      res.json(mempool);
+    });
+    app.get('/peers', cors, (req, res, next) => {
+      const urls = peers.map(({url}) => url);
+
+      res.json(urls);
+    });
+
+    const server = http.createServer(app)
+    const wss = new ws.Server({
+      noServer: true,
+    });
+    const connections = [];
+    wss.on('connection', c => {
+      const {url} = c.upgradeReq;
+
+      if (url === '/listen') {
+        connections.push(c);
+
+        c.on('close', () => {
+          connections.splice(connections.indexOf(c), 1);
+        });
       } else {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
-        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-        console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
-        process.stdout.write('> ');
+        c.close();
       }
-    },
-    charges: args => {
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
-      console.log(JSON.stringify(charges, null, 2));
-      process.stdout.write('> ');
-    },
-    minter: args => {
-      const [asset] = args;
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const minter = _getUnconfirmedMinter(db, mempool, asset);
-      console.log(JSON.stringify(minter, null, 2));
-      process.stdout.write('> ');
-    },
-    minters: args => {
-      const [asset] = args;
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      console.log(JSON.stringify(db.minters, null, 2));
-      process.stdout.write('> ');
-    },
-    send: args => {
-      const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
-      const quantityNumber = parseFloat(quantityString);
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
+    });
+    server.on('upgrade', (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, c => {
+        c.upgradeReq = req;
 
-      _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    addminter: args => {
-      const [address, asset, privateKey] = args;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createMinter({address, asset, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    mint: args => {
-      const [asset, quantityString, address, privateKey] = args;
-      const quantityNumber = parseFloat(quantityString);
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    charge: args => {
-      const [srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = args;
-      const dstAssetValue = dstAsset || null;
-      const srcQuantityNumber = parseFloat(srcQuantity);
-      const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    pack: args => {
-      const [srcAddress, asset, quantity, dstAddress, privateKey] = args;
-      const quantityNumber = parseFloat(quantity);
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    chargeback: args => {
-      const [chargeHash, privateKey] = args;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createChargeback({chargeHash, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    lock: args => {
-      const [address, privateKey] = args;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createLock({address, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    unlock: args => {
-      const [address, privateKey] = args;
-      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-      const timestamp = Date.now();
-
-      _createUnlock({address, startHeight, timestamp, privateKey})
-        .then(() => {
-          console.log('ok');
-          process.stdout.write('> ');
-        })
-        .catch(err => {
-          console.warn(err);
-        });
-    },
-    locked: args => {
-      const [address] = args;
-
-      if (address) {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const locked = _getUnconfirmedLocked(db, mempool, address);
-        console.log(JSON.stringify(locked, null, 2));
-        process.stdout.write('> ');
+        wss.emit('connection', c);
+      });
+    });
+    server.listen(port, host, err => {
+      if (!err) {
+        accept(server);
       } else {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const result = _getAllUnconfirmedLocked(db, mempool);
-        console.log(JSON.stringify(result, null, 2));
-        process.stdout.write('> ');
+        reject(err);
       }
-    },
-    mine: args => {
-      console.log(mineAddress !== null);
-      process.stdout.write('> ');
-    },
-    startmine: args => {
-      const [publicKey] = args;
-
-      _startMine(publicKey);
-      process.stdout.write('> ');
-    },
-    stopmine: args => {
-      _stopMine();
-      process.stdout.write('> ');
-    },
-    peers: args => {
-      if (peers.length > 0) {
-        console.log(peers.map(({url}) => url).join('\n'));
-      }
-      process.stdout.write('> ');
-    },
-    addpeer: args => {
-      const [url] = args;
-
-      _addPeer(url);
-      process.stdout.write('> ');
-    },
-    removepeer: args => {
-      const [url] = args;
-
-      _removePeer(url);
-      process.stdout.write('> ');
-    },
-    help: args => {
-      console.log('Available commands:');
-      console.log(
-        Object.keys(commands)
-          .map(cmd => '    ' + cmd)
-          .join('\n')
-      );
-      process.stdout.write('> ');
-    },
-  };
-
-  const r = repl.start({
-    prompt: '> ',
-    terminal: true,
-    eval: (s, context, filename, callback) => {
-      const split = s.split(/\s/);
-      const cmd = split[0];
-      const args = split.slice(1);
-
-      const command = commands[cmd];
-      if (command) {
-        command(args);
-      } else {
-        if (/^.+\n$/.test(s)) {
-          console.warn('invalid command');
-        }
-        process.stdout.write('> ');
-      }
-    },
+    });
   });
-  replHistory(r, path.join(dataDirectory, 'history.txt'));
-  r.on('exit', () => {
-    live = false;
-
-    server.close();
-    _stopMine();
+  const _requestRefreshPeers = () => {
     _refreshLivePeers();
 
-    process.on('SIGINT', () => {
-      console.log('ignoring SIGINT');
+    return Promise.resolve();
+  };
+  const _requestListenApi = () => {
+    api.on('block', block => {
+      const e = {
+        type: 'block',
+        block: block,
+      };
+      const es = JSON.stringify(e);
+
+      for (let i = 0; i < connections.length; i++) {
+        const connection = connections[i];
+        connection.send(es);
+      }
     });
-  });
+    api.on('message', message => {
+      const e = {
+        type: 'message',
+        message: message,
+      };
+      const es = JSON.stringify(e);
+
+      for (let i = 0; i < connections.length; i++) {
+        const connection = connections[i];
+        connection.send(es);
+      }
+    });
+    api.on('peer', peer => {
+      const e = {
+        type: 'peer',
+        peer: peer,
+      };
+      const es = JSON.stringify(e);
+
+      for (let i = 0; i < connections.length; i++) {
+        const connection = connections[i];
+        connection.send(es);
+      }
+     });
+
+    return Promise.resolve();
+  };
+  const _requestCli = server => {
+    const commands = {
+      db: args => {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        console.log(JSON.stringify(db, null, 2));
+        process.stdout.write('> ');
+      },
+      blockcount: args => {
+        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+        console.log(JSON.stringify(blockcount, null, 2));
+        process.stdout.write('> ');
+      },
+      blockcache: args => {
+        console.log(JSON.stringify(blocks, null, 2));
+        process.stdout.write('> ');
+      },
+      mempool: args => {
+        console.log(JSON.stringify(mempool.messages, null, 2));
+        process.stdout.write('> ');
+      },
+      getaddress: args => {
+        const [privateKey] = args;
+        const privateKeyBuffer = new Buffer(privateKey, 'base64');
+        const address = _getAddressFromPrivateKey(privateKeyBuffer);
+        console.log(address);
+        process.stdout.write('> ');
+      },
+      balance: args => {
+        const [address, asset] = args;
+
+        if (address && asset) {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const balance = _getUnconfirmedBalance(db, mempool, address, asset);
+          console.log(JSON.stringify(balance, null, 2));
+          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          process.stdout.write('> ')
+        } else if (address) {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const balances = _getUnconfirmedBalances(db, mempool, address);
+          console.log(JSON.stringify(balances, null, 2));
+          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          process.stdout.write('> ');
+        } else {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
+          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          process.stdout.write('> ');
+        }
+      },
+      charges: args => {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
+        console.log(JSON.stringify(charges, null, 2));
+        process.stdout.write('> ');
+      },
+      minter: args => {
+        const [asset] = args;
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const minter = _getUnconfirmedMinter(db, mempool, asset);
+        console.log(JSON.stringify(minter, null, 2));
+        process.stdout.write('> ');
+      },
+      minters: args => {
+        const [asset] = args;
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        console.log(JSON.stringify(db.minters, null, 2));
+        process.stdout.write('> ');
+      },
+      send: args => {
+        const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
+        const quantityNumber = parseFloat(quantityString);
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      addminter: args => {
+        const [address, asset, privateKey] = args;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createMinter({address, asset, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      mint: args => {
+        const [asset, quantityString, address, privateKey] = args;
+        const quantityNumber = parseFloat(quantityString);
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      charge: args => {
+        const [srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = args;
+        const dstAssetValue = dstAsset || null;
+        const srcQuantityNumber = parseFloat(srcQuantity);
+        const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      pack: args => {
+        const [srcAddress, asset, quantity, dstAddress, privateKey] = args;
+        const quantityNumber = parseFloat(quantity);
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createPack({srcAddress, dstAddress, asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      chargeback: args => {
+        const [chargeHash, privateKey] = args;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createChargeback({chargeHash, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      lock: args => {
+        const [address, privateKey] = args;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createLock({address, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      unlock: args => {
+        const [address, privateKey] = args;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createUnlock({address, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      locked: args => {
+        const [address] = args;
+
+        if (address) {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const locked = _getUnconfirmedLocked(db, mempool, address);
+          console.log(JSON.stringify(locked, null, 2));
+          process.stdout.write('> ');
+        } else {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const result = _getAllUnconfirmedLocked(db, mempool);
+          console.log(JSON.stringify(result, null, 2));
+          process.stdout.write('> ');
+        }
+      },
+      mine: args => {
+        console.log(mineAddress !== null);
+        process.stdout.write('> ');
+      },
+      startmine: args => {
+        const [publicKey] = args;
+
+        _startMine(publicKey);
+        process.stdout.write('> ');
+      },
+      stopmine: args => {
+        _stopMine();
+        process.stdout.write('> ');
+      },
+      peers: args => {
+        if (peers.length > 0) {
+          console.log(peers.map(({url}) => url).join('\n'));
+        }
+        process.stdout.write('> ');
+      },
+      addpeer: args => {
+        const [url] = args;
+
+        _addPeer(url);
+        process.stdout.write('> ');
+      },
+      removepeer: args => {
+        const [url] = args;
+
+        _removePeer(url);
+        process.stdout.write('> ');
+      },
+      help: args => {
+        console.log('Available commands:');
+        console.log(
+          Object.keys(commands)
+            .map(cmd => '    ' + cmd)
+            .join('\n')
+        );
+        process.stdout.write('> ');
+      },
+    };
+
+    const r = repl.start({
+      prompt: '> ',
+      terminal: true,
+      eval: (s, context, filename, callback) => {
+        const split = s.split(/\s/);
+        const cmd = split[0];
+        const args = split.slice(1);
+
+        const command = commands[cmd];
+        if (command) {
+          command(args);
+        } else {
+          if (/^.+\n$/.test(s)) {
+            console.warn('invalid command');
+          }
+          process.stdout.write('> ');
+        }
+      },
+    });
+    replHistory(r, path.join(dataDirectory, 'history.txt'));
+    r.on('exit', () => {
+      live = false;
+
+      server.close();
+      _stopMine();
+      _refreshLivePeers();
+
+      process.on('SIGINT', () => {
+        console.log('ignoring SIGINT');
+      });
+    });
+
+    return Promise.resolve();
+  };
+
+  _requestServer()
+    .then(server => Promise.all([
+      _requestRefreshPeers(),
+      _requestListenApi(),
+      _requestCli(server),
+    ]));
 };
 
 let mineAddress = null;
