@@ -815,8 +815,6 @@ class Peer {
       };
 
       this._redownloadInterval = setInterval(() => {
-        this._redownloadInterval = null;
-
         _recurse();
       }, 30 * 1000);
 
