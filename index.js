@@ -215,22 +215,24 @@ class Message {
   }
 
   verify(db, blocks, mempool = null, confirmingMessages = []) {
-    const {payload, signature} = this;
-    const payloadJson = JSON.parse(payload);
-    const {type} = payloadJson;
+    const {payload, hash, signature} = this;
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashHex = payloadHash.toString('hex');
 
-    if (signature) {
+    if (payloadHashHex === hash) {
+      const payloadJson = JSON.parse(payload);
       const {startHeight} = payloadJson;
       const endHeight = startHeight + MESSAGE_TTL;
       const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
       if (nextHeight >= startHeight && nextHeight < endHeight) {
         if (!db.messageHashes.some(signatures => signatures.includes(signature))) {
+          const {type} = payloadJson;
+
           switch (type) {
             case 'coinbase': {
               const {asset, quantity, address} = payloadJson;
               const publicKeyBuffer = NULL_PUBLIC_KEY;
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
@@ -265,7 +267,6 @@ class Message {
             case 'send': {
               const {asset, quantity, srcAddress, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
@@ -305,7 +306,6 @@ class Message {
             case 'minter': {
               const {asset, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
@@ -336,7 +336,6 @@ class Message {
             case 'mint': {
               const {asset, quantity, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
@@ -367,7 +366,6 @@ class Message {
             case 'charge': {
               const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
               const publicKeyBuffer = NULL_PUBLIC_KEY;
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
@@ -443,7 +441,6 @@ class Message {
             case 'pack': {
               const {srcAddress, dstAddress, asset, quantity, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === dstAddress) {
@@ -515,7 +512,6 @@ class Message {
                 const {srcAddress, dstAddress} = chargeMessagePayloadJson;
                 const {publicKey} = payloadJson;
                 const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                const payloadHash = crypto.createHash('sha256').update(payload).digest();
                 const signatureBuffer = new Buffer(signature, 'base64');
 
                 const _checkSignature = address =>
@@ -539,7 +535,6 @@ class Message {
             case 'lock': {
               const {address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
@@ -563,7 +558,6 @@ class Message {
             case 'unlock': {
               const {address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const payloadHash = crypto.createHash('sha256').update(payload).digest();
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
@@ -607,7 +601,7 @@ class Message {
     } else {
       return {
         status: 400,
-        error: 'missing signature',
+        error: 'invalid hash',
       };
     }
   }
