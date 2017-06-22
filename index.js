@@ -3304,6 +3304,22 @@ const _listen = () => {
       const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => _decorateCharge(charge));
       res.json(charges);
     });
+    app.post('/submitMessage', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+      const message = Message.from(body);
+
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const error = _addMessage(db, blocks, mempool, message);
+
+      if (!error) {
+        res.json({
+          ok: true,
+        });
+      } else {
+        res.status(error.status || 500);
+        res.json({error: error.stack});
+      }
+    });
     app.post('/createSend', cors, bodyParserJson, (req, res, next) => {
       const {body} = req;
 
