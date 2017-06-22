@@ -867,6 +867,7 @@ const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
 const initialDifficulty = 1e5;
 const initialTarget = _getDifficultyTarget(initialDifficulty);
 const zeroHash = bigint(0).toString(16);
+const connectionsSymbol = Symbol();
 
 const _getAllConfirmedBalances = db => _clone(db.balances);
 const _getConfirmedBalances = (db, address) => _clone(db.balances[address] || {});
@@ -3591,6 +3592,7 @@ const _listen = () => {
       noServer: true,
     });
     const connections = [];
+    server[connectionsSymbol] = connections;
     wss.on('connection', c => {
       const {url} = c.upgradeReq;
 
@@ -3624,7 +3626,9 @@ const _listen = () => {
 
     return Promise.resolve();
   };
-  const _requestListenApi = () => {
+  const _requestListenApi = server => {
+    const connections = server[connectionsSymbol];
+
     api.on('block', block => {
       const e = {
         type: 'block',
@@ -3949,7 +3953,7 @@ const _listen = () => {
   _requestServer()
     .then(server => Promise.all([
       _requestRefreshPeers(),
-      _requestListenApi(),
+      _requestListenApi(server),
       _requestCli(server),
     ]));
 };
