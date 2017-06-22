@@ -3259,6 +3259,15 @@ const _listen = () => {
       res.send();
     });
 
+    app.get('/status', cors, (req, res, next) => {
+      const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      const timestamp = Date.now();
+
+      res.json({
+        startHeight,
+        timestamp,
+      });
+    });
     app.get('/balances/:address', cors, (req, res, next) => {
       const {address} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
