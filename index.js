@@ -226,7 +226,7 @@ class Message {
       const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
       if (nextHeight >= startHeight && nextHeight < endHeight) {
-        if (!db.messageHashes.some(signatures => signatures.includes(signature))) {
+        if (!db.messageHashes.some(hashes => hashes.includes(hash))) {
           const {type} = payloadJson;
 
           switch (type) {
@@ -2289,7 +2289,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
   }
 
   // update message revocations
-  newDb.messageHashes.push(block.messages.map(({signature}) => signature));
+  newDb.messageHashes.push(block.messages.map(({hash}) => hash));
   while (newDb.messageHashes.length > MESSAGE_TTL) {
     newDb.messageHashes.shift();
   }
