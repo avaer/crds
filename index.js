@@ -2735,13 +2735,19 @@ const _loadState = () => {
       blockFiles,
     ]) => {
       const bestBlockHeight = (() => {
-        for (let height = 1; height <= blockFiles.length; height++) {
-          const foundBlockAtThisHeight = blockFiles.some(file => {
-            const match = file.match(/^block-([0-9]+)\.json$/);
-            return Boolean(match) && parseInt(match[1], 10) === height;
-          });
+        const blockHeightIndex = {};
+        for (let i = 0; i < blockFiles.length; i++) {
+          const blockFile = blockFiles[i];
+          const match = blockFile.match(/^block-([0-9]+)\.json$/);
 
-          if (!foundBlockAtThisHeight) {
+          if (match) {
+            const height = match[1];
+            blockHeightIndex[height] = true;
+          }
+        }
+
+        for (let height = 1; height <= blockFiles.length; height++) {
+          if (!blockHeightIndex[height]) {
             return height - 1;
           }
         }
