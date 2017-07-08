@@ -144,7 +144,9 @@ class Block {
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
         const message = this.messages[i];
-        const error = message.verify(db, blocks, mempool, this.messages);
+        const confirmingMessages = this.messages.slice();
+        confirmingMessages.splice(i, 1);
+        const error = message.verify(db, blocks, mempool, confirmingMessages);
         if (error) {
           return error;
         }
@@ -241,7 +243,7 @@ class Message {
                     const payloadJson = JSON.parse(confirmingMessage.payload);
                     const {type} = payloadJson;
                     return type === 'coinbase';
-                  }).length <= 1) {
+                  }).length === 0) {
                     return null;
                   } else {
                     return {
