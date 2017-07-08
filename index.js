@@ -309,7 +309,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                 if (minter === undefined) {
                   if (_isValidAsset(asset)) {
@@ -340,7 +340,7 @@ class Message {
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
                 if (quantity > 0 && Math.floor(quantity) === quantity) {
-                  const minter = !mempool ? _getConfirmedMinter(db, asset) : _getUnconfirmedMinter(db, mempool, asset);
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                   if (minter === address) {
                     return null;
@@ -1801,22 +1801,29 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
 
   return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
-const _getConfirmedMinter = (db, asset) => db.minters[asset];
-const _getUnconfirmedMinter = (db, mempool, asset) => {
-  let minter = _getConfirmedMinter(db, asset);
-
-  const mintAssetMessages = mempool.messages.filter(message => {
+const _getConfirmedMinter = (db, confirmingMessages, asset) => {
+  let minter = db.minters[asset];
+  minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
+  return minter;
+};
+const _getUnconfirmedMinter = (db, mempool, confirmingMessages, asset) => {
+  let minter = _getConfirmedMinter(db, confirmingMessages, asset);
+  minter = _getPostMessagesMinter(minter, asset, mempool.messages);
+  return minter;
+};
+const _getPostMessagesMinter = (minter, asset, messages) => {
+  const mintMessages = messages.filter(message => {
     const payloadJson = JSON.parse(message.payload);
     return (payloadJson.type === 'minter' && payloadJson.asset === asset) ||
       (payloadJson.type === 'send' && payloadJson.asset === (asset + ':mint'));
   });
 
   let done = false;
-  while (mintAssetMessages.length > 0 && !done) {
+  while (mintMessages.length > 0 && !done) {
     done = true;
 
-    for (let i = 0; i < mintAssetMessages.length; i++) {
-      const message = mintAssetMessages[i];
+    for (let i = 0; i < mintMessages.length; i++) {
+      const message = mintMessages[i];
       const payloadJson = JSON.parse(message.payload);
       const {type} = payloadJson;
 
@@ -1826,7 +1833,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
         if (minter === undefined) {
           minter = address;
           done = false;
-          mintAssetMessages.splice(i, 1);
+          mintMessages.splice(i, 1);
           break;
         }
       } else if (type === 'send') {
@@ -1834,7 +1841,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
 
         if (minter === srcAddress) {
           minter = dstAddress;
-          mintAssetMessages.splice(i, 1);
+          mintMessages.splice(i, 1);
           done = false;
           break;
         }
@@ -3517,7 +3524,7 @@ const _listen = () => {
       minter: args => {
         const [asset] = args;
         const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const minter = _getUnconfirmedMinter(db, mempool, asset);
+        const minter = _getUnconfirmedMinter(db, mempool, [], asset);
         console.log(JSON.stringify(minter, null, 2));
         process.stdout.write('> ');
       },
