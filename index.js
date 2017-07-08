@@ -1805,21 +1805,23 @@ const _getConfirmedMinter = (db, asset) => db.minters[asset];
 const _getUnconfirmedMinter = (db, mempool, asset) => {
   let minter = _getConfirmedMinter(db, asset);
 
-  const mintAssetMessages = mempool.messages.filter(message =>
-    message.type === 'minter' && message.asset === asset ||
-    message.type === 'send' && message.asset === (asset + ':mint')
-  );
+  const mintAssetMessages = mempool.messages.filter(message => {
+    const payloadJson = JSON.parse(message.payload);
+    return (payloadJson.type === 'minter' && payloadJson.asset === asset) ||
+      (payloadJson.type === 'send' && payloadJson.asset === (asset + ':mint'));
+  });
 
   let done = false;
   while (mintAssetMessages.length > 0 && !done) {
     done = true;
 
     for (let i = 0; i < mintAssetMessages.length; i++) {
-      const mintMessage = mintAssetMessages[i];
-      const {type} = mintMessage;
+      const message = mintAssetMessages[i];
+      const payloadJson = JSON.parse(message.payload);
+      const {type} = payloadJson;
 
       if (type === 'minter') {
-        const {address} = mintMessage;
+        const {address} = payloadJson;
 
         if (minter === undefined) {
           minter = address;
@@ -1828,7 +1830,7 @@ const _getUnconfirmedMinter = (db, mempool, asset) => {
           break;
         }
       } else if (type === 'send') {
-        const {srcAddress, dstAddress} = mintMessage;
+        const {srcAddress, dstAddress} = payloadJson;
 
         if (minter === srcAddress) {
           minter = dstAddress;
