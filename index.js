@@ -275,30 +275,37 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
-                if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
-                  if (!mempool) {
-                    if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
-                      return null;
+                if (_isValidAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
+                    if (!mempool) {
+                      if (_getConfirmedBalance(db, srcAddress, asset) >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 402,
+                          error: 'insufficient funds',
+                        };
+                      }
                     } else {
-                      return {
-                        status: 402,
-                        error: 'insufficient funds',
-                      };
+                      if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 402,
+                          error: 'insufficient funds',
+                        };
+                      }
                     }
                   } else {
-                    if (_getUnconfirmedBalance(db, mempool, srcAddress, asset) >= quantity) {
-                      return null;
-                    } else {
-                      return {
-                        status: 402,
-                        error: 'insufficient funds',
-                      };
-                    }
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
                   }
                 } else {
                   return {
                     status: 400,
-                    error: 'invalid quantity',
+                    error: 'invalid asset',
                   };
                 }
               } else {
@@ -314,21 +321,21 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+                if (_isBaseAsset(asset)) {
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
-                if (minter === undefined) {
-                  if (_isValidAsset(asset)) {
+                  if (minter === undefined) {
                     return null;
                   } else {
                     return {
                       status: 400,
-                      stack: 'invalid asset name',
+                      stack: 'asset already has minter',
                     };
                   }
                 } else {
                   return {
                     status: 400,
-                    stack: 'asset already has minter',
+                    stack: 'invalid asset',
                   };
                 }
               } else {
@@ -344,27 +351,35 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                if (quantity > 0 && Math.floor(quantity) === quantity) {
-                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+                if (_isValidAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const baseAsset = _getBaseAsset(asset);
+                    const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
 
-                  if (minter === address) {
-                    return null;
-                  } else {
-                    const isFreeMinter = !mempool ? _isConfirmedFreeMinter(db, confirmingMessages, asset) : _isUnconfirmedFreeMinter(db, mempool, confirmingMessages, asset);
-
-                    if (isFreeMinter) {
+                    if (minter === address) {
                       return null;
                     } else {
-                      return {
-                        status: 400,
-                        stack: 'address is not minter of this asset',
-                      };
+                      const isFreeMinter = !mempool ? _isConfirmedFreeMinter(db, confirmingMessages, baseAsset) : _isUnconfirmedFreeMinter(db, mempool, confirmingMessages, baseAsset);
+
+                      if (isFreeMinter) {
+                        return null;
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'address is not minter of this asset',
+                        };
+                      }
                     }
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
                   }
                 } else {
                   return {
                     status: 400,
-                    error: 'invalid quantity',
+                    error: 'invalid asset',
                   };
                 }
               } else {
@@ -380,14 +395,21 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+                if (_isBaseAsset(asset)) {
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
-                if (minter === address) {
-                  return null;
+                  if (minter === address) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'address is not minter of this asset',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
-                    stack: 'address is not minter of this asset',
+                    error: 'invalid asset',
                   };
                 }
               } else {
@@ -403,14 +425,21 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+                if (_isBaseAsset(asset)) {
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
-                if (minter === address) {
-                  return null;
+                  if (minter === address) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'address is not minter of this asset',
+                    };
+                  }
                 } else {
                   return {
                     status: 400,
-                    stack: 'address is not minter of this asset',
+                    error: 'invalid asset',
                   };
                 }
               } else {
@@ -838,7 +867,9 @@ class Peer {
 const _clone = o => JSON.parse(JSON.stringify(o));
 const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
-const _isValidAsset = asset => /^[A-Z]+$/.test(asset);
+const _isValidAsset = asset => /^[A-Z]+(?:\.[A-Z]+)?$/.test(asset);
+const _isBaseAsset = asset => /^[A-Z]+$/.test(asset);
+const _getBaseAsset = asset => asset.match(/^[A-Z]+)/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
 const _decorateCharge = charge => {
   const result = JSON.parse(charge.payload);
