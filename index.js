@@ -1749,7 +1749,7 @@ const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
   return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getConfirmedMinter = (db, confirmingMessages, asset) => {
-  let minter = db.minters[asset] || null;
+  let minter = db.minters[asset];
   minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
   return minter;
 };
