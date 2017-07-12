@@ -869,7 +869,7 @@ const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('s
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
 const _isValidAsset = asset => /^[A-Z]+(?:\.[A-Z]+)?$/.test(asset);
 const _isBaseAsset = asset => /^[A-Z]+$/.test(asset);
-const _getBaseAsset = asset => asset.match(/^[A-Z]+)/)[1];
+const _getBaseAsset = asset => asset.match(/^([A-Z]+)/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
 const _decorateCharge = charge => {
   const result = JSON.parse(charge.payload);
