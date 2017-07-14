@@ -43,7 +43,6 @@ const NULL_PRIVATE_KEY = (() => {
 const NULL_PUBLIC_KEY = eccrypto.getPublic(NULL_PRIVATE_KEY);
 const DEFAULT_DB = {
   balances: {},
-  charges: [],
   messageHashes: [],
   minters: {
     [CRD]: null,
@@ -449,115 +448,6 @@ class Message {
                 };
               }
             }
-            case 'charge': {
-              const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-              const publicKeyBuffer = NULL_PUBLIC_KEY;
-              const signatureBuffer = new Buffer(signature, 'base64');
-
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                if (_isValidAsset(srcAsset) && (dstAsset === null || _isValidAsset(dstAsset))) {
-                  if (
-                    (srcQuantity > 0 && Math.floor(srcQuantity) === srcQuantity) &&
-                    ((dstAsset === null && dstQuantity === 0) || (dstQuantity > 0 && Math.floor(dstQuantity) === dstQuantity))
-                  ) {
-                    if (!mempool) {
-                      if (
-                        !_getConfirmedLocked(db, srcAddress) &&
-                        (dstAsset === null || !_getConfirmedLocked(db, dstAddress))
-                      ) {
-                        if (
-                          _getConfirmedBalance(db, srcAddress, srcAsset) >= srcQuantity &&
-                          (dstAsset === null || _getConfirmedBalance(db, dstAddress, dstAsset) >= dstQuantity)
-                        ) {
-                          return null;
-                        } else {
-                          return {
-                            status: 402,
-                            stack: 'insufficient funds',
-                          };
-                        }
-                      } else {
-                        return {
-                          status: 400,
-                          stack: 'addresses locked',
-                        };
-                      }
-                    } else {
-                      if (
-                        !_getUnconfirmedLocked(db, mempool, srcAddress) &&
-                        (dstAsset === null || !_getUnconfirmedLocked(db, mempool, dstAddress))
-                      ) {
-                        if (
-                          _getUnconfirmedUnsettledBalance(db, mempool, srcAddress, srcAsset) >= srcQuantity &&
-                          (dstAsset === null || _getUnconfirmedUnsettledBalance(db, mempool, dstAddress, dstAsset) >= dstQuantity)
-                        ) {
-                          return null;
-                        } else {
-                          return {
-                            status: 402,
-                            stack: 'insufficient funds',
-                          };
-                        }
-                      } else {
-                        return {
-                          status: 400,
-                          stack: 'addresses locked',
-                        };
-                      }
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid quantities',
-                    };
-                  }
-                } else {
-                  return {
-                    status: 400,
-                    error: 'invalid assets',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'invalid signature',
-                };
-              }
-            }
-            case 'chargeback': {
-              const {chargeHash} = payloadJson;
-              const chargeMessage = (
-                !mempool ?
-                  _findConfirmedChargelikeMessage(blocks, chargeHash)
-                :
-                  _findUnconfirmedChargelikeMessage(blocks, mempool, chargeHash)
-              ) || _findConfirmingChargelikeMessage(confirmingMessages, chargeHash);
-
-              if (chargeMessage) {
-                const chargeMessagePayloadJson = JSON.parse(chargeMessage.payload);
-                const {srcAddress, dstAddress} = chargeMessagePayloadJson;
-                const {publicKey} = payloadJson;
-                const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                const signatureBuffer = new Buffer(signature, 'base64');
-
-                const _checkSignature = address =>
-                  eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) &&
-                  _getAddressFromPublicKey(publicKeyBuffer) === address;
-                if (_checkSignature(srcAddress) || _checkSignature(dstAddress)) {
-                  return null;
-                } else {
-                  return {
-                    status: 400,
-                    error: 'invalid signature',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'no such charge to chargeback',
-                };
-              }
-            }
             case 'lock': {
               const {address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
@@ -871,12 +761,6 @@ const _isValidAsset = asset => /^[A-Z]+(?:\.[A-Z]+)?$/.test(asset);
 const _isBaseAsset = asset => /^[A-Z]+$/.test(asset);
 const _getBaseAsset = asset => asset.match(/^([A-Z]+)/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
-const _decorateCharge = charge => {
-  const result = JSON.parse(charge.payload);
-  result.hash = charge.hash;
-  result.signature = charge.signature;
-  return result;
-};
 
 let dbs = [];
 let blocks = [];
@@ -951,54 +835,6 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         dstAssetEntry = 0;
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
-    } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-      let srcAddressEntry = result[srcAddress];
-      if (srcAddressEntry === undefined){
-        srcAddressEntry = {};
-        result[srcAddress] = srcAddressEntry;
-      }
-      let srcAssetEntry = srcAddressEntry[srcAsset];
-      if (srcAssetEntry === undefined) {
-        srcAssetEntry = 0;
-      }
-      srcAddressEntry[srcAsset] = srcAssetEntry - srcQuantity;
-
-      let dstAddressEntry = result[dstAddress];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        result[dstAddress] = dstAddressEntry;
-      }
-      let dstAssetEntry = dstAddressEntry[srcAsset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
-      }
-      dstAddressEntry[srcAsset] = dstAssetEntry + srcQuantity;
-
-      if (dstAsset) {
-        let dstAddressEntry = result[dstAddress];
-        if (dstAddressEntry === undefined) {
-          dstAddressEntry = {};
-          result[dstAddress] = dstAddressEntry;
-        }
-        let dstAssetEntry = dstAddressEntry[dstAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        dstAddressEntry[dstAsset] = dstAssetEntry - dstQuantity;
-
-        let srcAddressEntry = result[srcAddress];
-        if (srcAddressEntry === undefined) {
-          srcAddressEntry = {};
-          result[srcAddress] = srcAddressEntry;
-        }
-        let srcAssetEntry = srcAddressEntry[dstAsset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        srcAddressEntry[dstAsset] = srcAssetEntry + dstQuantity;
-      }
     } else if (type === 'mint') {
       const {address, asset, quantity} = payloadJson;
 
@@ -1069,40 +905,6 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         }
         result[asset] = dstAssetEntry + quantity;
       }
-    } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-      if (srcAddress === address) {
-        let srcAssetEntry = result[srcAsset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        result[srcAsset] = srcAssetEntry - srcQuantity;
-      }
-      if (dstAddress === address) {
-        let dstAssetEntry = result[srcAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        result[srcAsset] = dstAssetEntry + srcQuantity;
-      }
-
-      if (dstAsset) {
-        if (dstAddress === address) {
-          let dstAssetEntry = result[dstAsset];
-          if (dstAssetEntry === undefined) {
-            dstAssetEntry = 0;
-          }
-          result[dstAsset] = dstAssetEntry - dstQuantity;
-        }
-        if (srcAddress === address) {
-          let srcAssetEntry = result[dstAsset];
-          if (srcAssetEntry === undefined) {
-            srcAssetEntry = 0;
-          }
-          result[dstAsset] = srcAssetEntry + dstQuantity;
-        }
-      }
     } else if (type === 'mint') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
@@ -1157,27 +959,6 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           result = result + quantity;
         }
       }
-    } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-      if (srcAsset === asset) {
-        if (srcAddress === address) {
-          result = result - srcQuantity;
-        }
-        if (dstAddress === address) {
-          result = result + srcQuantity;
-        }
-      }
-      if (dstAsset) {
-        if (dstAsset === asset) {
-          if (dstAddress === address) {
-            result = result - dstQuantity;
-          }
-          if (srcAddress === address) {
-            result = result + dstQuantity;
-          }
-        }
-      }
     } else if (type === 'mint') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
@@ -1195,558 +976,6 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
   }
 
   return result;
-};
-const _getUnconfirmedUnsettledBalances = (db, mempool, address) => {
-  let result = _getConfirmedBalances(db, address);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'coinbase') {
-      const {asset, quantity, address: localAddress} = payloadJson;
-
-      if (localAddress === address) {
-        let assetEntry = result[asset];
-        if (assetEntry === undefined) {
-          assetEntry = 0;
-        }
-        result[asset] = assetEntry + quantity;
-      }
-    } else if (type === 'send') {
-      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
-
-      if (srcAddress === address) {
-        let srcAssetEntry = result[asset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        result[asset] = srcAssetEntry - quantity;
-      }
-
-      if (dstAddress === address) {
-        let dstAssetEntry = result[asset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        result[asset] = dstAssetEntry + quantity;
-      }
-    } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-      if (srcAddress === address) {
-        let srcAssetEntry = result[srcAsset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        result[srcAsset] = srcAssetEntry - srcQuantity;
-      }
-      if (dstAddress === address) {
-        let dstAssetEntry = result[srcAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        result[srcAsset] = dstAssetEntry + srcQuantity;
-      }
-
-      if (dstAsset) {
-        if (dstAddress === address) {
-          let dstAssetEntry = result[dstAsset];
-          if (dstAssetEntry === undefined) {
-            dstAssetEntry = 0;
-          }
-          result[dstAsset] = dstAssetEntry - dstQuantity;
-        }
-        if (srcAddress === address) {
-          let srcAssetEntry = result[dstAsset];
-          if (srcAssetEntry === undefined) {
-            srcAssetEntry = 0;
-          }
-          result[dstAsset] = srcAssetEntry + dstQuantity;
-        }
-      }
-    } else if (type === 'mint') {
-      const {address: localAddress, asset, quantity} = payloadJson;
-
-      if (localAddress === address) {
-        let assetEntry = result[asset];
-        if (assetEntry === undefined) {
-          assetEntry = 0;
-        }
-        result[asset] = assetEntry + quantity;
-      }
-    } else if (type === 'minter') {
-      const {address: localAddress, asset} = payloadJson;
-      const mintAsset = asset + ':mint';
-
-      if (localAddress === address) {
-        let mintAssetEntry = result[mintAsset];
-        if (mintAssetEntry === undefined) {
-          mintAssetEntry = 0;
-        }
-        mintAssetEntry = mintAssetEntry + 1;
-        result[mintAsset] = mintAssetEntry;
-      }
-    }
-  }
-
-  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
-  for (let i = 0; i < invalidatedCharges.length; i++) {
-    const charge = invalidatedCharges[i];
-    const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = JSON.parse(charge.payload);
-
-    if (srcAddress === address) {
-      let srcAssetEntry = result[srcAsset];
-      if (srcAssetEntry === undefined) {
-        srcAssetEntry = 0;
-      }
-      result[srcAsset] = srcAssetEntry + srcQuantity;
-    }
-    if (dstAddress === address) {
-      let dstAssetEntry = result[srcAsset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
-      }
-      result[srcAsset] = dstAssetEntry - srcQuantity;
-    }
-
-    if (dstAsset) {
-      if (dstAddress === address) {
-        let dstAssetEntry = result[dstAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        result[dstAsset] = dstAssetEntry + dstQuantity;
-      }
-      if (srcAddress === address) {
-        let srcAssetEntry = result[dstAsset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        result[dstAsset] = srcAssetEntry - dstQuantity;
-      }
-    }
-  }
-
-  return result;
-};
-const _getUnconfirmedUnsettledBalance = (db, mempool, address, asset) => {
-  let result = _getConfirmedBalance(db, address, asset);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'coinbase') {
-      const {asset: localAsset, quantity, address: localAddress} = payloadJson;
-
-      if (localAsset === asset && localAddress === address) {
-        result = result + quantity;
-      }
-    } else if (type === 'send') {
-      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
-
-      if (a === asset) {
-        if (srcAddress === address) {
-          result = result - quantity;
-        }
-        if (dstAddress === address) {
-          result = result + quantity;
-        }
-      }
-    } else if (type === 'charge') {
-      const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-      if (srcAddress === address && srcAsset === asset) {
-        result = result - srcQuantity;
-      }
-      if (dstAddress === address && srcAsset === asset) {
-        result = result + srcQuantity;
-      }
-      if (dstAsset) {
-        if (dstAddress === address && dstAsset === asset) {
-          result = result - dstQuantity;
-        }
-        if (srcAddress === address && dstAsset === asset) {
-          result = result + dstQuantity;
-        }
-      }
-    } else if (type === 'mint') {
-      const {address: localAddress, asset: localAsset, quantity} = payloadJson;
-
-      if (localAddress === address && localAsset === asset) {
-        result = result + quantity;
-      }
-    } else if (type === 'minter') {
-      const {address: localAddress, asset: localAsset} = payloadJson;
-      const mintAsset = localAsset + ':mint';
-
-      if (localAddress === address && mintAsset === asset) {
-        result = result + 1;
-      }
-    }
-  }
-
-  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
-  for (let i = 0; i < invalidatedCharges.length; i++) {
-    const charge = invalidatedCharges[i];
-    const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-    if (a === asset) {
-      if (srcAddress === address) {
-        result = result + quantity;
-      }
-      if (dstAddress === address) {
-        result = result - quantity;
-      }
-    }
-  }
-
-  return result;
-};
-const _getAllConfirmedCharges = db => db.charges.slice();
-const _getConfirmedCharges = (db, address) => db.charges.filter(charge => {
-  const payloadJson = JSON.parse(charge.payload);
-  const {srcAddress, dstAddress} = payloadJson;
-  return srcAddress === address || dstAddress === address;
-});
-const _getAllUnconfirmedCharges = (db, mempool) => {
-  const result = _getAllConfirmedCharges(db);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'charge') {
-      result.push(message);
-    }
-  }
-
-  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
-  for (let i = 0; i < invalidatedCharges.length; i++) {
-    const invalidatedCharge = invalidatedCharges[i];
-    const index = result.findIndex(charge => charge.signature === invalidatedCharge.signature);
-
-    if (index !== -1) {
-      result.splice(index, 1);
-    }
-  }
-
-  return result;
-};
-const _getUnconfirmedCharges = (db, mempool, address) => {
-  const result = _getConfirmedCharges(db, address);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'charge') {
-      result.push(message);
-    }
-  }
-
-  const invalidatedCharges = _getUnconfirmedInvalidatedCharges(db, mempool);
-  for (let i = 0; i < invalidatedCharges.length; i++) {
-    const invalidatedCharge = invalidatedCharges[i];
-    const index = result.findIndex(charge => charge.signature === invalidatedCharge.signature);
-
-    if (index !== -1) {
-      result.splice(index, 1);
-    }
-  }
-
-  return result;
-};
-const _findChargelikeBlockHeight = (blocks, chargeHash) => {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i];
-    const {messages} = block;
-    const chargeMessage = _findLocalChargelikeMessage(messages, chargeHash);
-
-    if (chargeMessage) {
-      return block.height;
-    }
-  }
-  return -1;
-};
-const _findLocalChargelikeMessage = (messages, chargeHash) => {
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i];
-    const {payload, hash} = message;
-    const payloadJson = JSON.parse(payload);
-    const {type} = payloadJson;
-
-    if (type === 'charge' && hash === chargeHash) {
-      return message;
-    }
-  }
-  return null;
-};
-const _findConfirmedChargelikeMessage = (blocks, chargeHash) => {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i];
-    const {messages} = block;
-    const message = _findLocalChargelikeMessage(messages, chargeHash);
-
-    if (message) {
-      return message;
-    }
-  }
-
-  return null;
-};
-const _findUnconfirmedChargelikeMessage = (blocks, mempool, chargeHash) => {
-  const confirmedChargelikeMessage = _findConfirmedChargelikeMessage(blocks, chargeHash);
-
-  if (confirmedChargelikeMessage !== null) {
-    return confirmedChargelikeMessage;
-  } else {
-    return _findLocalChargelikeMessage(mempool.messages, chargeHash);
-  }
-};
-const _findConfirmingChargelikeMessage = (confirmingMessages, chargeHash) => _findLocalChargelikeMessage(confirmingMessages, chargeHash);
-class AddressAssetSpec {
-  constructor(address, asset, balance, charges) {
-    this.address = address;
-    this.asset = asset;
-    this.balance = balance;
-    this.charges = charges;
-  }
-
-  equals(addressAssetSpec) {
-    return this.address === addressAssetSpec.address && this.asset === addressAssetSpec.asset;
-  }
-}
-const _getConfirmedInvalidatedCharges = (db, blocks, block) => {
-  const charges = db.charges.slice();
-  const chargebacks = block.messages.filter(message => {
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-    return type === 'chargeback';
-  });
-  const directlyInvalidatedCharges = chargebacks.map(chargeback => {
-    const {chargeHash} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findConfirmedChargelikeMessage(blocks, chargeHash) || _findConfirmingChargelikeMessage(block.messages, chargeHash);
-    return chargeMessage || null;
-  }).filter(chargeMessage => chargeMessage !== null);
-
-  const confirmedAddressAssetSpecs = (() => {
-    const result = [];
-
-    for (let i = 0; i < directlyInvalidatedCharges.length; i++) {
-      const charge = directlyInvalidatedCharges[i];
-      const {asset, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-      const srcEntry = new AddressAssetSpec(asset, srcAddress, 0, []);
-      if (!result.some(entry => entry.equals(srcEntry))) {
-        srcEntry.balance = _getConfirmedBalance(db, srcAddress, asset);
-
-        result.push(srcEntry);
-      }
-
-      const dstEntry = new AddressAssetSpec(asset, dstAddress, 0, []);
-      if (!result.some(entry => entry.equals(dstEntry))) {
-        dstEntry.balance = _getConfirmedBalance(db, dstAddress, asset);
-
-        result.push(dstEntry);
-      }
-    }
-
-    return result;
-  })();
-  const unsettledInvalidatedConfirmedAddressAssetSpecs = confirmedAddressAssetSpecs.map(addressAssetSpec => {
-    const {address, asset} = addressAssetSpec;
-    let {balance} = addressAssetSpec;
-    const charges = addressAssetSpec.charges.slice();
-
-    for (let i = 0; i < charges.length; i++) {
-      const charge = charges[i];
-
-      if (!directlyInvalidatedCharges.includes(charge)) {
-        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-        if (a === asset) {
-          let applied = false;
-
-          if (srcAddress === address) {
-            balance = balance - quantity;
-            applied = true;
-          }
-          if (dstAddress === address) {
-            balance = balance + quantity;
-            applied = true;
-          }
-
-          if (applied) {
-            charges.push(charge);
-          }
-        }
-      }
-    }
-
-    return new AddressAssetSpec(address, asset, balance, charges);
-  });
-
-  const indirectlyInvalidatedCharges = (() => {
-    const result = [];
-
-    for (let i = 0; i < unsettledInvalidatedConfirmedAddressAssetSpecs.length; i++) {
-      const assetSpec = unsettledInvalidatedConfirmedAddressAssetSpecs[i];
-      const {address, asset} = assetSpec;
-      let {balance} = assetSpec;
-      const charges = assetSpec.charges.slice()
-        .sort((a, b) => {
-          const aJson = JSON.parse(a.payload);
-          const bJson = JSON.parse(b.payload);
-
-          const timestampDiff = aJson.timestamp - bJson.timestamp;
-          if (timestampDiff !== 0) {
-            return timestampDiff;
-          } else {
-            if (bigint(aJson.hash).leq(bigint(bJson.hash))) {
-              return -1;
-            } else {
-              return 1;
-            }
-          }
-        });
-
-      while (balance < 0 && charges.length > 0) {
-        const charge = charges.pop();
-        const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-        if (srcAddress === address) {
-          balance = balance + quantity;
-        }
-        if (dstAddress === address) {
-          balance = balance - quantity;
-        }
-
-        result.push(charge);
-      }
-    }
-
-    return result;
-  })();
-
-  return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
-};
-const _getUnconfirmedInvalidatedCharges = (db, mempool) => {
-  const _messageTypeEquals = type => message => JSON.parse(message.payload).type === type;
-
-  const charges = db.charges.concat(mempool.messages.filter(_messageTypeEquals('charge')));
-  const chargebacks = mempool.messages.filter(_messageTypeEquals('chargeback'));
-  const directlyInvalidatedCharges = chargebacks.map(chargeback => {
-    const {chargeHash} = JSON.parse(chargeback.payload);
-    const chargeMessage = _findUnconfirmedChargelikeMessage(blocks, mempool, chargeHash);
-    return chargeMessage || null;
-  }).filter(chargeMessage => chargeMessage !== null);
-
-  const confirmedAddressAssetSpecs = (() => {
-    const result = [];
-
-    for (let i = 0; i < directlyInvalidatedCharges.length; i++) {
-      const charge = directlyInvalidatedCharges[i];
-      const {asset, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-      const srcEntry = new AddressAssetSpec(asset, srcAddress, 0, []);
-      if (!result.some(entry => entry.equals(srcEntry))) {
-        srcEntry.balance = _getConfirmedBalance(db, srcAddress, asset);
-
-        result.push(srcEntry);
-      }
-
-      const dstEntry = new AddressAssetSpec(asset, dstAddress, 0, []);
-      if (!result.some(entry => entry.equals(dstEntry))) {
-        dstEntry.balance = _getConfirmedBalance(db, dstAddress, asset);
-
-        result.push(dstEntry);
-      }
-    }
-
-    return result;
-  })();
-  const unsettledInvalidatedConfirmedAddressAssetSpecs = confirmedAddressAssetSpecs.map(addressAssetSpec => {
-    const {address, asset} = addressAssetSpec;
-    let {balance} = addressAssetSpec;
-    const charges = addressAssetSpec.charges.slice();
-
-    for (let i = 0; i < charges.length; i++) {
-      const charge = charges[i];
-
-      if (!directlyInvalidatedCharges.includes(charge)) {
-        const {asset: a, quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-        if (a === asset) {
-          let applied = false;
-
-          if (srcAddress === address) {
-            balance = balance - quantity;
-            applied = true;
-          }
-          if (dstAddress === address) {
-            balance = balance + quantity;
-            applied = true;
-          }
-
-          if (applied) {
-            charges.push(charge);
-          }
-        }
-      }
-    }
-
-    return new AddressAssetSpec(address, asset, balance, charges);
-  });
-
-  const indirectlyInvalidatedCharges = (() => {
-    const result = [];
-
-    for (let i = 0; i < unsettledInvalidatedConfirmedAddressAssetSpecs.length; i++) {
-      const assetSpec = unsettledInvalidatedConfirmedAddressAssetSpecs[i];
-      const {address, asset} = assetSpec;
-      let {balance} = assetSpec;
-      const charges = assetSpec.charges.slice()
-        .sort((a, b) => {
-          const aJson = JSON.parse(a.payload);
-          const bJson = JSON.parse(b.payload);
-
-          const timestampDiff = aJson.timestamp - bJson.timestamp;
-          if (timestampDiff !== 0) {
-            return timestampDiff;
-          } else {
-            if (bigint(aJson.hash).leq(bigint(bJson.hash))) {
-              return -1;
-            } else {
-              return 1;
-            }
-          }
-        });
-
-      while (balance < 0 && charges.length > 0) {
-        const charge = charges.pop();
-        const {quantity, srcAddress, dstAddress} = JSON.parse(charge.payload);
-
-        if (srcAddress === address) {
-          balance = balance + quantity;
-        }
-        if (dstAddress === address) {
-          balance = balance - quantity;
-        }
-
-        result.push(charge);
-      }
-    }
-
-    return result;
-  })();
-
-  return directlyInvalidatedCharges.concat(indirectlyInvalidatedCharges);
 };
 const _getConfirmedMinter = (db, confirmingMessages, asset) => {
   let minter = db.minters[asset];
@@ -2039,19 +1268,6 @@ const _getBlockForkOrigin = (blocks, mempool, block) => {
 
 const _commitMainChainBlock = (db, blocks, mempool, block) => {
   const newDb = _clone(db);
-  _decorateDb(newDb);
-
-  const immediateChargebackHashes = block.messages.map(message => {
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'chargeback') {
-      const {chargeHash} = payloadJson;
-      return chargeHash;
-    } else {
-      return null;
-    }
-  }).filter(hash => hash !== null);
 
   // update balances
   for (let i = 0; i < block.messages.length; i++) {
@@ -2106,60 +1322,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         const baseAsset = match[1];
         newDb.minters[baseAsset] = dstAddress;
       }
-    } else if (type === 'charge') {
-      if (!immediateChargebackHashes.includes(hash)) {
-        const {srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity} = payloadJson;
-
-        let srcAddressEntry = newDb.balances[srcAddress];
-        if (srcAddressEntry === undefined){
-          srcAddressEntry = {};
-          newDb.balances[srcAddress] = srcAddressEntry;
-        }
-        let srcAssetEntry = srcAddressEntry[srcAsset];
-        if (srcAssetEntry === undefined) {
-          srcAssetEntry = 0;
-        }
-        srcAssetEntry = srcAssetEntry - srcQuantity;
-        srcAddressEntry[srcAsset] = srcAssetEntry;
-
-        let dstAddressEntry = newDb.balances[dstAddress];
-        if (dstAddressEntry === undefined){
-          dstAddressEntry = {};
-          newDb.balances[dstAddress] = dstAddressEntry;
-        }
-        let dstAssetEntry = dstAddressEntry[srcAsset];
-        if (dstAssetEntry === undefined) {
-          dstAssetEntry = 0;
-        }
-        dstAssetEntry = dstAssetEntry + srcQuantity;
-        dstAddressEntry[srcAsset] = dstAssetEntry;
-
-        if (dstAsset) {
-          let dstAddressEntry = newDb.balances[dstAddress];
-          if (dstAddressEntry === undefined){
-            dstAddressEntry = {};
-            newDb.balances[dstAddress] = dstAddressEntry;
-          }
-          let dstAssetEntry = dstAddressEntry[dstAsset];
-          if (dstAssetEntry === undefined) {
-            dstAssetEntry = 0;
-          }
-          dstAssetEntry = dstAssetEntry - dstQuantity;
-          dstAddressEntry[dstAsset] = dstAssetEntry;
-
-          let srcAddressEntry = newDb.balances[srcAddress];
-          if (srcAddressEntry === undefined){
-            srcAddressEntry = {};
-            newDb.balances[srcAddress] = srcAddressEntry;
-          }
-          let srcAssetEntry = srcAddressEntry[dstAsset];
-          if (srcAssetEntry === undefined) {
-            srcAssetEntry = 0;
-          }
-          srcAssetEntry = srcAssetEntry + dstQuantity;
-          srcAddressEntry[dstAsset] = srcAssetEntry;
-        }
-      }
     } else if (type === 'minter') {
       const {asset, address} = payloadJson;
       const mintAsset = asset + ':mint';
@@ -2209,64 +1371,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       delete newDb.locked[address];
     } else {
       throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
-    }
-  }
-
-  // add new charges
-  for (let i = 0; i < block.messages.length; i++) {
-    const message = block.messages[i];
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-
-    if (type === 'charge') {
-      newDb.charges.push(message);
-    }
-  }
-
-  // apply chargebacks
-  const invalidatedCharges = _getConfirmedInvalidatedCharges(newDb, blocks, block);
-  for (let i = 0; i < invalidatedCharges.length; i++) {
-    const charge = invalidatedCharges[i];
-    newDb.charges.splice(newDb.charges.indexOf(charge), 1);
-  }
-
-  // settle charges
-  const oldCharges = newDb.charges.slice();
-  const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-  for (let i = 0; i < oldCharges.length; i++) {
-    const charge = oldCharges[i];
-    const chargePayload = JSON.parse(charge.payload);
-    const {signature} = chargePayload;
-    const chargeBlockHeight = _findChargelikeBlockHeight(blocks, signature);
-
-    if (chargeBlockHeight !== -1 && (nextBlockHeight - chargeBlockHeight) >= CHARGE_SETTLE_BLOCKS) {
-      const {asset, quantity, srcAddress, dstAddress} = chargePayload;
-
-      let srcAddressEntry = newDb.balances[srcAddress];
-      if (srcAddressEntry === undefined){
-        srcAddressEntry = {};
-        newDb.balances[srcAddress] = srcAddressEntry;
-      }
-      let srcAssetEntry = srcAddressEntry[asset];
-      if (srcAssetEntry === undefined) {
-        srcAssetEntry = 0;
-      }
-      srcAssetEntry = srcAssetEntry - quantity;
-      srcAddressEntry[asset] = srcAssetEntry;
-
-      let dstAddressEntry = newDb.balances[dstAddress];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        newDb.balances[dstAddress] = dstAddressEntry;
-      }
-      let dstAssetEntry = dstAddressEntry[asset];
-      if (dstAssetEntry === undefined) {
-        dstAssetEntry = 0;
-      }
-      dstAssetEntry = dstAssetEntry + quantity;
-      dstAddressEntry[asset] = dstAssetEntry;
-
-      newDb.charges.splice(newDb.charges.indexOf(charge), 1);
     }
   }
 
@@ -2664,15 +1768,6 @@ const doHash = () => new Promise((accept, reject) => {
 const dbDataPath = path.join(dataDirectory, 'db');
 const blocksDataPath = path.join(dataDirectory, 'blocks');
 const peersDataPath = path.join(dataDirectory, 'peers.txt');
-const _decorateDb = db => {
-  db.charges = db.charges.map(charge => Message.from(charge));
-};
-const _decorateDbs = dbs => {
-  for (let i = 0; i < dbs.length; i++) {
-    const db = dbs[i];
-    _decorateDb(db);
-  }
-};
 const _decorateBlocks = blocks => {
   for (let i = 0; i < blocks.length; i++) {
     blocks[i] = Block.from(blocks[i]);
@@ -2787,15 +1882,11 @@ const _loadState = () => {
           ]) => {
             // NOTE: we are assuming no file corruption
             dbs = newDbs;
-            _decorateDbs(dbs);
-
             blocks = newBlocks;
             _decorateBlocks(blocks);
           });
       } else { // nothing to salvage; bootstrap db and do a full sync
         dbs = [];
-        _decorateDbs(dbs);
-
         blocks = [];
         _decorateBlocks(blocks);
 
@@ -3168,40 +2259,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createCharge = ({srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp}) => {
-    const privateKeyBuffer = NULL_PRIVATE_KEY;
-    const payload = JSON.stringify({type: 'charge', srcAddress, dstAddress, srcAsset, srcQuantity, dstAsset, dstQuantity, startHeight, timestamp});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
-  const _createChargeback = ({chargeHash, startHeight, timestamp, privateKey}) => {
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'chargeback', chargeHash, publicKey: publicKeyString, startHeight, timestamp});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
   const _createLock = ({address, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -3277,26 +2334,14 @@ const _listen = () => {
     app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
       const {address} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const balances = _getUnconfirmedUnsettledBalances(db, mempool, address);
+      const balances = _getUnconfirmedBalances(db, mempool, address);
       res.json(balances);
     });
     app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
       const {address, asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const balance = _getUnconfirmedUnsettledBalance(db, mempool, address, asset);
+      const balance = _getUnconfirmedBalance(db, mempool, address, asset);
       res.json(balance);
-    });
-    app.get('/charges/:address', cors, (req, res, next) => {
-      const {address} = req.params;
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const charges = _getConfirmedCharges(db, address).map(charge => _decorateCharge(charge));
-      res.json(charges);
-    });
-    app.get('/unconfirmedCharges/:address', cors, (req, res, next) => {
-      const {address} = req.params;
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const charges = _getUnconfirmedCharges(db, mempool, address).map(charge => _decorateCharge(charge));
-      res.json(charges);
     });
     app.post('/submitMessage', cors, bodyParserJson, (req, res, next) => {
       const {body} = req;
@@ -3505,12 +2550,6 @@ const _listen = () => {
           process.stdout.write('> ');
         }
       },
-      charges: args => {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const charges = _getAllUnconfirmedCharges(db, mempool).map(charge => _decorateCharge(charge));
-        console.log(JSON.stringify(charges, null, 2));
-        process.stdout.write('> ');
-      },
       minter: args => {
         const [asset] = args;
         const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
@@ -3588,37 +2627,6 @@ const _listen = () => {
         const timestamp = Date.now();
 
         _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      charge: args => {
-        const [srcAddress, srcAsset, srcQuantity, dstAddress, dstAsset, dstQuantity] = args;
-        const dstAssetValue = dstAsset || null;
-        const srcQuantityNumber = parseFloat(srcQuantity);
-        const dstQuantityNumber = dstAsset ? parseFloat(dstQuantity) : 0;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createCharge({srcAddress, dstAddress, srcAsset, srcQuantity: srcQuantityNumber, dstAsset: dstAssetValue, dstQuantity: dstQuantityNumber, startHeight, timestamp})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      chargeback: args => {
-        const [chargeHash, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createChargeback({chargeHash, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
