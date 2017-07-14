@@ -55,6 +55,7 @@ const DEFAULT_MEMPOOL = {
   blocks: [],
   messages: [],
 };
+const fsSymbol = Symbol();
 
 const args = process.argv.slice(2);
 const _findArg = name => {
@@ -388,7 +389,7 @@ class Message {
               }
             }
             case 'free': {
-              const {asset, publicKey} = payloadJson;
+              const {asset, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
@@ -418,7 +419,7 @@ class Message {
               }
             }
             case 'unfree': {
-              const {asset, publicKey} = payloadJson;
+              const {asset, address, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
@@ -438,6 +439,36 @@ class Message {
                   return {
                     status: 400,
                     error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'data': {
+              const {asset, address, data, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+
+                if (minter === address) {
+                  if (data.length < 256) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'data too large',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    stack: 'address is not minter of this asset',
                   };
                 }
               } else {
@@ -1276,6 +1307,20 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
     }
   }
 
+  // decorate with fs data so it's saved first
+  const fsData = {};
+  for (let i = 0; i < block.messages.length; i++) {
+    const message = block.messages[i];
+    const {playload} = message;
+    const payloadJson = JSON.parse(payload);
+    const {type} = payloadJson;
+    if (type === 'data') {
+      const {asset, data} = payloadJson;
+      fsData[asset] = data;
+    }
+  }
+  newDb[fsSymbol] = fsData;
+
   // update message revocations
   newDb.messageHashes.push(block.messages.map(({hash}) => hash));
   while (newDb.messageHashes.length > MESSAGE_TTL) {
@@ -1816,7 +1861,26 @@ const _ensureDataPaths = () => {
 };
 const _saveState = (() => {
   const _doSave = cb => {
-    const _writeNewFiles = () => {
+    const _writeNewFsFiles = () => {
+      const db = dbs[dbs.length - 1];
+      const {[fsSymbol]: fsData} = db;
+
+      if (fsData) {
+        return Promise.all(Object.keys(fsData).map(asset => new Promise((accept, reject) => {
+          const data = fsData[asset];
+          writeFileAtomic(path.join(fsDataPath, asset), data, err => {
+            if (!err) {
+              accept();
+            } else {
+              reject(err);
+            }
+          });
+        })));
+      } else {
+        return Promise.resolve();
+      }
+    };
+    const _writeNewDbBlockFiles = () => {
       const promises = [];
       const _writeFile = (p, d) => new Promise((accept, reject) => {
         writeFileAtomic(p, d, err => {
@@ -1842,7 +1906,7 @@ const _saveState = (() => {
 
       return Promise.all(promises);
     };
-    const _removeOldFiles = () => {
+    const _removeOldDbBlockFiles = () => {
       const _removeDbFiles = () => new Promise((accept, reject) => {
         fs.readdir(dbDataPath, (err, dbFiles) => {
           if (!err || err.code === 'ENOENT') {
@@ -1935,7 +1999,8 @@ const _saveState = (() => {
     };
 
     _writeNewFiles()
-      .then(() => _removeOldFiles())
+      .then(() => _writeNewDbBlockFiles())
+      .then(() => _removeOldDbBlockFiles())
       .then(() => {
         cb();
       })
