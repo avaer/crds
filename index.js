@@ -389,12 +389,13 @@ class Message {
               }
             }
             case 'free': {
-              const {asset, address, publicKey} = payloadJson;
+              const {asset, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (_isBaseAsset(asset)) {
+                  const address = _getAddressFromPublicKey(publicKeyBuffer);
                   const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                   if (minter === address) {
@@ -423,8 +424,9 @@ class Message {
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (_isBaseAsset(asset)) {
+                  const address = _getAddressFromPublicKey(publicKeyBuffer);
                   const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                   if (minter === address) {
@@ -449,11 +451,12 @@ class Message {
               }
             }
             case 'data': {
-              const {asset, address, data, publicKey} = payloadJson;
+              const {asset, data, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                const address = _getAddressFromPublicKey(publicKeyBuffer);
                 const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                 if (minter === address) {
