@@ -50,7 +50,6 @@ const DEFAULT_DB = {
   freeMinters: {
     CRD: false,
   },
-  locked: {},
 };
 const DEFAULT_MEMPOOL = {
   blocks: [],
@@ -439,52 +438,6 @@ class Message {
                   return {
                     status: 400,
                     error: 'invalid asset',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'invalid signature',
-                };
-              }
-            }
-            case 'lock': {
-              const {address, publicKey} = payloadJson;
-              const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const signatureBuffer = new Buffer(signature, 'base64');
-
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const locked = !mempool ? _getConfirmedLocked(db, address) : _getUnconfirmedLocked(db, mempool, address);
-
-                if (!locked) {
-                  return null;
-                } else {
-                  return {
-                    status: 400,
-                    stack: 'address is already locked',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'invalid signature',
-                };
-              }
-            }
-            case 'unlock': {
-              const {address, publicKey} = payloadJson;
-              const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const signatureBuffer = new Buffer(signature, 'base64');
-
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
-                const locked = !mempool ? _getConfirmedLocked(db, address) : _getUnconfirmedLocked(db, mempool, address);
-
-                if (locked) {
-                  return null;
-                } else {
-                  return {
-                    status: 400,
-                    stack: 'address is not locked',
                   };
                 }
               } else {
@@ -1104,81 +1057,6 @@ const _getPostMessagesFreeMinter = (freeMinter, asset, messages) => {
 
   return freeMinter;
 };
-const _getAllConfirmedLocked = db => _clone(db.locked);
-const _getConfirmedLocked = (db, address) => db.locked[address] || false;
-const _getAllUnconfirmedLocked = (db, mempool) => {
-  const result = _getAllConfirmedLocked(db);
-
-  const lockAddressMessages = mempool.messages.filter(message => {
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-    return type === 'lock' || type === 'unlock';
-  });
-
-  let done = false;
-  while (lockAddressMessages.length > 0 && !done) {
-    done = true;
-
-    for (let i = 0; i < lockAddressMessages.length; i++) {
-      const lockMessage = lockAddressMessages[i];
-      const payloadJson = JSON.parse(lockMessage.payload);
-      const {type, address} = payloadJson;
-      const oldLocked = result[address] || false;
-
-      if (type === 'lock' && !oldLocked) {
-        result[address] = true;
-        done = false;
-        lockAddressMessages.splice(i, 1);
-        break;
-      } else if (type === 'unlock' && oldLocked) {
-        delete result[address];
-        lockAddressMessages.splice(i, 1);
-        done = false;
-        break;
-      }
-    }
-  }
-
-  return result;
-};
-const _getUnconfirmedLocked = (db, mempool, address) => {
-  let locked = _getConfirmedLocked(db, address);
-
-  const lockAddressMessages = mempool.messages.filter(message => {
-    const payloadJson = JSON.parse(message.payload);
-    const {type} = payloadJson;
-    return type === 'lock' || type === 'unlock';
-  });
-
-  let done = false;
-  while (lockAddressMessages.length > 0 && !done) {
-    done = true;
-
-    for (let i = 0; i < lockAddressMessages.length; i++) {
-      const lockMessage = lockAddressMessages[i];
-      const payloadJson = JSON.parse(lockMessage.payload);
-      const {address: localAddress} = payloadJson;
-
-      if (localAddress === address) {
-        const {type} = payloadJson;
-
-        if (type === 'lock' && !locked) {
-          locked = true;
-          done = false;
-          lockAddressMessages.splice(i, 1);
-          break;
-        } else if (type === 'unlock' && locked) {
-          locked = false;
-          lockAddressMessages.splice(i, 1);
-          done = false;
-          break;
-        }
-      }
-    }
-  }
-
-  return locked;
-};
 const _checkBlockExists = (blocks, mempool, block) => {
   const checkBlockIndex = block.height - 1;
   const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
@@ -1393,14 +1271,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
-    } else if (type === 'lock') {
-      const {address} = payloadJson;
-
-      newDb.locked[address] = true;
-    } else if (type === 'unlock') {
-      const {address} = payloadJson;
-
-      delete newDb.locked[address];
     } else {
       throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
     }
@@ -2292,42 +2162,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createLock = ({address, startHeight, timestamp, privateKey}) => {
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'lock', address, startHeight, timestamp, publicKey: publicKeyString});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
-  const _createUnlock = ({address, startHeight, timestamp, privateKey}) => {
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'unlock', address, startHeight, timestamp, publicKey: publicKeyString});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
 
   const _requestServer = () => new Promise((accept, reject) => {
     const app = express();
@@ -2695,49 +2529,6 @@ const _listen = () => {
           .catch(err => {
             console.warn(err);
           });
-      },
-      lock: args => {
-        const [address, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createLock({address, startHeight, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      unlock: args => {
-        const [address, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createUnlock({address, startHeight, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      locked: args => {
-        const [address] = args;
-
-        if (address) {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const locked = _getUnconfirmedLocked(db, mempool, address);
-          console.log(JSON.stringify(locked, null, 2));
-          process.stdout.write('> ');
-        } else {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const result = _getAllUnconfirmedLocked(db, mempool);
-          console.log(JSON.stringify(result, null, 2));
-          process.stdout.write('> ');
-        }
       },
       mine: args => {
         console.log(mineAddress !== null);
