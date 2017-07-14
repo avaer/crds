@@ -2144,7 +2144,7 @@ const _listen = () => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, publicKey: publicKeyString, timestamp});
+    const payload = JSON.stringify({type: 'send', asset, quantity, srcAddress, dstAddress, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2163,6 +2163,24 @@ const _listen = () => {
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'minter', address, asset, publicKey: publicKeyString, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, payloadHashString, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
+  const _createData = ({asset, data, startHeight, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'data', asset, data, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2547,6 +2565,20 @@ const _listen = () => {
         const timestamp = Date.now();
 
         _createMinter({address, asset, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      data: args => {
+        const [asset, data, privateKey] = args;
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createData({asset, data, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
