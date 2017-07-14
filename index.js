@@ -1028,7 +1028,7 @@ const _getPostMessagesMinter = (minter, asset, messages) => {
   return minter;
 };
 const _isConfirmedFreeMinter = (db, confirmingMessages, asset) => {
-  let freeMinter = db.freeMinters[asset] || false;
+  let freeMinter = db.freeMinters[asset] || !db.minters[asset];
   freeMinter = _getPostMessagesFreeMinter(freeMinter, asset, confirmingMessages);
   return freeMinter;
 };
