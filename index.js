@@ -977,6 +977,38 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 
   return result;
 };
+const _requestConfirmedAssetData = asset => new Promise((accept, reject) => {
+  const rs = fs.createReadStream(path.join(fsDataPath, asset));
+  rs.on('open', () => {
+    accept(rs);
+  });
+  rs.on('error', err => {
+    if (err.code === 'ENOENT') {
+      accept(null);
+    } else {
+      reject(err);
+    }
+  });
+});
+const _requestUnconfirmedAssetData = (mempool, asset) => _requestConfirmedAssetData(asset)
+  .then(rs => {
+    if (rs) {
+      return Promise.resolve(rs);
+    } else {
+      let payloadJson = null;
+      const message = mempool.messages.find(message => {
+        payloadJson = JSON.parse(message.payload);
+        return payloadJson.type === 'data' && payloadJson.asset === asset;
+      });
+      if (message) {
+        const rs = new stream.PassThrough();
+        rs.end(payloadJson.data);
+        return Promise.resolve(rs);
+      } else {
+        return Promise.resolve(null);
+      }
+    }
+  });
 const _getConfirmedMinter = (db, confirmingMessages, asset) => {
   let minter = db.minters[asset];
   minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
@@ -1768,6 +1800,7 @@ const doHash = () => new Promise((accept, reject) => {
 const dbDataPath = path.join(dataDirectory, 'db');
 const blocksDataPath = path.join(dataDirectory, 'blocks');
 const peersDataPath = path.join(dataDirectory, 'peers.txt');
+const fsDataPath = path.join(dataDirectory, 'fs');
 const _decorateBlocks = blocks => {
   for (let i = 0; i < blocks.length; i++) {
     blocks[i] = Block.from(blocks[i]);
@@ -2342,6 +2375,34 @@ const _listen = () => {
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const balance = _getUnconfirmedBalance(db, mempool, address, asset);
       res.json(balance);
+    });
+    app.get('/data/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      _requestConfirmedAssetData(asset)
+        .then(rs => {
+          res.type('application/octet-stream');
+          rs.pipe(res);
+        })
+        .catch(err =>  {
+          res.status(500);
+          res.json({
+            error: err.stack,
+          });
+        });
+    });
+    app.get('/unconfirmedData/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      _requestUnconfirmedAssetData(asset)
+        .then(rs => {
+          res.type('application/octet-stream');
+          rs.pipe(res);
+        })
+        .catch(err =>  {
+          res.status(500);
+          res.json({
+            error: err.stack,
+          });
+        });
     });
     app.post('/submitMessage', cors, bodyParserJson, (req, res, next) => {
       const {body} = req;
