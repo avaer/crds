@@ -2233,8 +2233,11 @@ const _listen = () => {
           ok: true,
         });
       } else {
+        const errorString = error.error || error.stack;
         res.status(error.status || 500);
-        res.json({error: error.stack});
+        res.json({error: errorString});
+
+        console.warn(errorString);
       }
     });
     app.get('/blocks/:height', cors, (req, res, next) => {
