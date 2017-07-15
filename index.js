@@ -426,6 +426,69 @@ class Message {
                 };
               }
             }
+            case 'buy': {
+              const {asset, quantity, price, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBaseAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    if (isFinite(price) && price > 0 && Math.floor(price) === price) {
+                      const address = _getAddressFromPublicKey(publicKeyBuffer);
+                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+
+                      if (minter) {
+                        const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
+
+                        if (prices.includes(price)) {
+                          const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, address, CRD);
+
+                          if (balance >= (quantity * price)) {
+                            return null;
+                          } else {
+                            return {
+                              status: 400,
+                              stack: 'insufficient funds',
+                            };
+                          }
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'incorrect declared price',
+                          };
+                        }
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'address is not minter of this asset',
+                        };
+                      }
+                    } else {
+                      return {
+                        status: 400,
+                        stack: 'invalid price',
+                      };
+                    }
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
             case 'data': {
               const {asset, data, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
@@ -1023,34 +1086,30 @@ const _getPostMessagesMinter = (minter, asset, messages) => {
   return minter;
 };
 const _getConfirmedPrice = (db, confirmingMessages, asset) => {
-  let price = db.prices[asset] || (db.minters[asset] ? Infinity : 0);
-  price = _getPostMessagesPrice(price, asset, confirmingMessages);
-  return price;
+  const prices = _getConfirmedPrices(db, confirmingMessages, asset);
+  return prices[prices.length - 1];
 };
-const _getUnconfirmedPrice = (db, confirmingMessages, asset) => {
-  let price = _getConfirmedPrice(db, confirmingMessages, asset);
-  price = _getPostMessagesPrice(price, asset, mempool.messages);
-  return price;
+const _getUnconfirmedPrice = (db, mempool, confirmingMessages, asset) => {
+  const prices = _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
+  return prices[prices.length - 1];
 };
-const _getPostMessagesPrice = (price, asset, messages) => {
-  const priceMessages = messages.filter(message => {
-    const payloadJson = JSON.parse(message.payload);
-    return payloadJson.type === 'price' && payloadJson.asset === asset;
-  });
-
-  let done = false;
-  while (priceMessages.length > 0 && !done) {
-    done = true;
-
-    for (let i = 0; i < priceMessages.length; i++) {
-      const message = mintMessages[i];
-      const payloadJson = JSON.parse(message.payload);
-      price = payloadJson.price;
-    }
-  }
-
-  return price;
+const _getConfirmedPrices = (db, confirmingMessages, asset) => {
+  let prices = [db.prices[asset] || (db.minters[asset] ? Infinity : 0)];
+  prices = _getPostMessagesPrices(prices, asset, confirmingMessages);
+  return prices;
 };
+const _getUnconfirmedPrices = (db, mempool, confirmingMessages, asset) => {
+  let prices = _getConfirmedPrices(db, confirmingMessages, asset);
+  prices = _getPostMessagesPrices(prices, asset, mempool.messages);
+  return prices;
+};
+const _getPostMessagesPrices = (prices, asset, messages) => prices
+  .concat(
+    messages
+      .map(message => JSON.parse(message.payload))
+      .filter(payloadJson => payloadJson.type === 'price' && payloadJson.asset === asset)
+      .map(({price}) => price)
+  );
 const _checkBlockExists = (blocks, mempool, block) => {
   const checkBlockIndex = block.height - 1;
   const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
@@ -1244,9 +1303,42 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
 
       newDb.minters[asset] = address;
     } else if (type === 'price') {
-      const {asset} = payloadJson;
+      const {asset, price} = payloadJson;
 
-      newDb.prices[asset] = true;
+      newDb.prices[asset] = price;
+    } else if (type === 'buy') {
+      const {asset, quantity, price} = payloadJson;
+      const minter = newDb.minters[asset];
+
+      let srcAddressEntry = newDb.balances[minter];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        newDb.balances[srcAddress] = srcAddressEntry;
+      }
+      let srcAddressDstAssetEntry = srcAddressEntry[CRD];
+      if (srcAddressDstAssetEntry === undefined) {
+        srcAddressDstAssetEntry = 0;
+      }
+      srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
+      srcAddressEntry[CRD] = srcAddressDstAssetEntry;
+
+      let dstAddressEntry = newDb.balances[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        newDb.balances[dstAddress] = dstAddressEntry;
+      }
+      let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
+      if (dstAddressSrcAssetEntry === undefined) {
+        dstAddressSrcAssetEntry = 0;
+      }
+      dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
+      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
+      let dstAddressDstAssetEntry = dstAddressEntry[asset];
+      if (dstAddressDstAssetEntry === undefined) {
+        dstAddressDstAssetEntry = 0;
+      }
+      dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
+      dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
@@ -1821,7 +1913,7 @@ const _ensureDataPaths = () => {
 const _saveState = (() => {
   const _doSave = cb => {
     const _writeNewFsFiles = () => {
-      const db = dbs[dbs.length - 1];
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const {[fsSymbol]: fsData} = db;
 
       if (fsData) {
@@ -1834,7 +1926,10 @@ const _saveState = (() => {
               reject(err);
             }
           });
-        })));
+        })))
+          .then(() => {
+            db[fsSymbol] = null; // memory optimization
+          });
       } else {
         return Promise.resolve();
       }
@@ -2155,6 +2250,24 @@ const _listen = () => {
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'price', asset, price, publicKey: publicKeyString, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, payloadHashString, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
+  const _createBuy = ({asset, quantity, price, startHeight, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
+    const publicKey = eccrypto.getPublic(privateKeyBuffer);
+    const publicKeyString = publicKey.toString('base64');
+    const payload = JSON.stringify({type: 'buy', asset, quantity, price, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2531,6 +2644,22 @@ const _listen = () => {
         const timestamp = Date.now();
 
         _createPrice({asset, price, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      buy: args => {
+        const [asset, quantity, privateKey] = args;
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const price = _getConfirmedPrice(db, [], asset);
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createBuy({asset, quantity, price, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
