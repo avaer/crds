@@ -2526,8 +2526,12 @@ const _listen = () => {
       startmine: args => {
         const [publicKey] = args;
 
-        _startMine(publicKey);
-        process.stdout.write('> ');
+        if (publicKey) {
+          _startMine(publicKey);
+          process.stdout.write('> ');
+        } else {
+          console.warn('invalid public key');
+        }
       },
       stopmine: args => {
         _stopMine();
@@ -2613,17 +2617,17 @@ const _mine = () => {
       if (block !== null) {
         const now = Date.now();
         const timeDiff = now - lastBlockTime;
-        const timeTaken = timeDiff / 1000;
         lastBlockTime = now;
         numHashes = 0;
 
         const error = _addBlock(dbs, blocks, mempool, block);
-        if (error) {
+        if (!error) {
+          const difficulty = _getNextBlockBaseDifficulty(blocks);
+          const timeTaken = timeDiff / 1000;
+          console.log('mined block', difficulty, timeTaken);
+        } else {
           console.warn('add mined block error:', error);
         }
-
-        /* const difficulty = _getNextBlockBaseDifficulty(blocks);
-        console.log('new difficulty', difficulty); */
       }
 
       mineImmediate = setImmediate(_mine);
