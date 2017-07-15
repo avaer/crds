@@ -753,7 +753,7 @@ const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('s
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
 const _isValidAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$)))?$/.test(asset);
 const _isBaseAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+$/.test(asset);
-const _getBaseAsset = asset => asset.match(/^(?:[A-Z0-9]|(?!^)\-(?!$))+$/)[1];
+const _getBaseAsset = asset => asset.match(/^((?:[A-Z0-9]|(?!^)\-(?!$))+)$/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
 
 let dbs = [];
