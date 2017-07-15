@@ -902,7 +902,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         dstAddressSrcAssetEntry = 0;
       }
       dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
-      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
+      dstAddressEntry[CRD] = dstAddressSrcAssetEntry;
       let dstAddressDstAssetEntry = dstAddressEntry[asset];
       if (dstAddressDstAssetEntry === undefined) {
         dstAddressDstAssetEntry = 0;
@@ -1003,35 +1003,27 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
-      let srcAddressEntry = result[srcAddress];
-      if (srcAddressEntry === undefined){
-        srcAddressEntry = {};
-        result[srcAddress] = srcAddressEntry;
+      if (srcAddress === address) {
+        let assetEntry = result[CRD];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[CRD] = assetEntry + (price * quantity);
       }
-      let srcAddressDstAssetEntry = srcAddressEntry[CRD];
-      if (srcAddressDstAssetEntry === undefined) {
-        srcAddressDstAssetEntry = 0;
-      }
-      srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
-      srcAddressEntry[CRD] = srcAddressDstAssetEntry;
 
-      let dstAddressEntry = result[dstAddress];
-      if (dstAddressEntry === undefined){
-        dstAddressEntry = {};
-        result[dstAddress] = dstAddressEntry;
+      if (dstAddress === address) {
+        let crdEntry = result[CRD];
+        if (crdEntry === undefined) {
+          crdEntry = 0;
+        }
+        result[CRD] = crdEntry - (price * quantity);
+
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = assetEntry + quantity;
       }
-      let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
-      if (dstAddressSrcAssetEntry === undefined) {
-        dstAddressSrcAssetEntry = 0;
-      }
-      dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
-      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
-      let dstAddressDstAssetEntry = dstAddressEntry[asset];
-      if (dstAddressDstAssetEntry === undefined) {
-        dstAddressDstAssetEntry = 0;
-      }
-      dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
-      dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint') {
       const {asset, quantity, publicKey} = payloadJson;
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
@@ -1102,23 +1094,19 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'buy') {
-      if (asset === CRD) {
-        const {asset: localAddress} = payloadJson;
+      const {address: localAddress, asset: localAsset} = payloadJson;
 
+      if (asset === CRD) {
+        const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
+
+        if (address === minter) {
+          const {quantity, price} = payloadJson;
+          result = result + (price * quantity);
+        }
         if (address === localAddress) {
           result = result - (price * quantity);
-        } else {
-          const {asset: localAsset} = payloadJson;
-          const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
-
-          if (minter === address) {
-            const {quantity, price} = payloadJson;
-            result = result + (price * quantity);
-          }
         }
       } else {
-        const {address: localAddress, asset: localAsset} = payloadJson;
-
         if (address === localAddress && asset === localAsset) {
           const {quantity, price} = payloadJson;
           result = result + quantity;
