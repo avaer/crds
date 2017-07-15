@@ -910,7 +910,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint') {
-      const {asset, quantity} = payloadJson;
+      const {asset, quantity, publicKey} = payloadJson;
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const address = _getAddressFromPublicKey(publicKeyBuffer);
 
