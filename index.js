@@ -486,7 +486,7 @@ class Message {
                         const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
 
                         if (prices.includes(price)) {
-                          const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, address, CRD);
+                          const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, mempool, address, CRD);
 
                           if (balance >= (quantity * price)) {
                             return null;
