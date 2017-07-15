@@ -903,6 +903,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       }
       dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
       dstAddressEntry[CRD] = dstAddressSrcAssetEntry;
+
       let dstAddressDstAssetEntry = dstAddressEntry[asset];
       if (dstAddressDstAssetEntry === undefined) {
         dstAddressDstAssetEntry = 0;
@@ -1426,7 +1427,8 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         dstAddressSrcAssetEntry = 0;
       }
       dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
-      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
+      dstAddressEntry[CRD] = dstAddressSrcAssetEntry;
+
       let dstAddressDstAssetEntry = dstAddressEntry[asset];
       if (dstAddressDstAssetEntry === undefined) {
         dstAddressDstAssetEntry = 0;
