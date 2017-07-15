@@ -388,6 +388,50 @@ class Message {
                 };
               }
             }
+            case 'get': {
+              const {address, asset, quantity} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isValidAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const baseAsset = _getBaseAsset(asset);
+                    const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
+
+                    if (minter === undefined || minter === address) {
+                      return null;
+                    } else {
+                      const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
+
+                      if (price === 0) {
+                        return null;
+                      } else {
+                        return {
+                          status: 400,
+                          stack: 'address cannot mint this asset',
+                        };
+                      }
+                    }
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
             case 'price': {
               const {asset, price, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
@@ -830,7 +874,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         dstAssetEntry = 0;
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
-    } else if (type === 'mint') {
+    } else if (type === 'mint' || type === 'get') {
       const {address, asset, quantity} = payloadJson;
 
       let addressEntry = result[address];
@@ -900,7 +944,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         }
         result[asset] = dstAssetEntry + quantity;
       }
-    } else if (type === 'mint') {
+    } else if (type === 'mint' || type === 'get') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
       if (localAddress === address) {
@@ -954,7 +998,7 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           result = result + quantity;
         }
       }
-    } else if (type === 'mint') {
+    } else if (type === 'mint' || type === 'get') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
@@ -1280,7 +1324,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
-    } else if (type === 'mint') {
+    } else if (type === 'mint' || type === 'get') {
       const {asset, quantity, publicKey} = payloadJson;
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const address = _getAddressFromPublicKey(publicKeyBuffer);
@@ -2168,6 +2212,22 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
+  const _createGet = ({address, asset, quantity, startHeight, timestamp}) => {
+    const privateKeyBuffer = NULL_PRIVATE_KEY;
+    const payload = JSON.stringify({type: 'get', address, asset, quantity, startHeight, timestamp});
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashString = payloadHash.toString('hex');
+    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
+    const signatureString = signature.toString('base64');
+    const message = new Message(payload, payloadHashString, signatureString);
+    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+    const error = _addMessage(db, blocks, mempool, message);
+    if (!error) {
+      return Promise.resolve();
+    } else {
+      return Promise.reject(error);
+    }
+  };
 
   const _requestServer = () => new Promise((accept, reject) => {
     const app = express();
@@ -2521,6 +2581,21 @@ const _listen = () => {
         const timestamp = Date.now();
 
         _createMint({asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
+          .then(() => {
+            console.log('ok');
+            process.stdout.write('> ');
+          })
+          .catch(err => {
+            console.warn(err);
+          });
+      },
+      get: args => {
+        const [address, asset, quantityString] = args;
+        const quantityNumber = parseInt(quantityString, 10);
+        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const timestamp = Date.now();
+
+        _createMint({address, asset, quantity: quantityNumber, startHeight, timestamp})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
