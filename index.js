@@ -909,7 +909,23 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       }
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
-    } else if (type === 'mint' || type === 'get') {
+    } else if (type === 'mint') {
+      const {asset, quantity} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry = assetEntry + quantity;
+      addressEntry[asset] = assetEntry;
+    } else if (type === 'get') {
       const {address, asset, quantity} = payloadJson;
 
       let addressEntry = result[address];
@@ -924,8 +940,10 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'minter') {
-      const {address, asset} = payloadJson;
+      const {asset, publicKey} = payloadJson;
       const mintAsset = asset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = result[address];
       if (addressEntry === undefined){
@@ -1014,7 +1032,20 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       }
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
-    } else if (type === 'mint' || type === 'get') {
+    } else if (type === 'mint') {
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        assetEntry = assetEntry + quantity;
+        result[asset] = assetEntry;
+      }
+    } else if (type === 'get') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
       if (localAddress === address) {
@@ -1026,7 +1057,9 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         result[asset] = assetEntry;
       }
     } else if (type === 'minter') {
-      const {address: localAddress, asset} = payloadJson;
+      const {asset, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address) {
         const mintAsset = asset + ':mint';
@@ -1091,15 +1124,25 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           result = result + quantity;
         }
       }
-    } else if (type === 'mint' || type === 'get') {
+    } else if (type === 'mint') {
+      const {asset: localAsset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address && localAsset === asset) {
+        result = result + quantity;
+      }
+    } else if (type === 'get') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
         result = result + quantity;
       }
     } else if (type === 'minter') {
-      const {address: localAddress, asset: localAsset} = payloadJson;
+      const {asset: localAsset, publicKey} = payloadJson;
       const mintAsset = localAsset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address && mintAsset === asset) {
         result = result + 1;
@@ -1136,18 +1179,22 @@ const _getPostMessagesMinter = (minter, asset, messages) => {
       const {type} = payloadJson;
 
       if (type === 'minter') {
-        const {address} = payloadJson;
-
         if (minter === undefined) {
+          const {publicKey} = payloadJson;
+          const publicKeyBuffer = new Buffer(publicKey, 'base64');
+          const address = _getAddressFromPublicKey(publicKeyBuffer);
+
           minter = address;
           done = false;
           mintMessages.splice(i, 1);
           break;
         }
       } else if (type === 'send') {
-        const {srcAddress, dstAddress} = payloadJson;
+        const {srcAddress} = payloadJson;
 
         if (minter === srcAddress) {
+          const {dstAddress} = payloadJson;
+
           minter = dstAddress;
           mintMessages.splice(i, 1);
           done = false;
@@ -1359,25 +1406,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         const baseAsset = match[1];
         newDb.minters[baseAsset] = dstAddress;
       }
-    } else if (type === 'minter') {
-      const {asset, publicKey} = payloadJson;
-      const mintAsset = asset + ':mint';
-      const publicKeyBuffer = new Buffer(publicKey, 'base64');
-      const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-      let addressEntry = newDb.balances[address];
-      if (addressEntry === undefined){
-        addressEntry = {};
-        newDb.balances[address] = addressEntry;
-      }
-      let mintAssetEntry = addressEntry[mintAsset];
-      if (mintAssetEntry === undefined) {
-        mintAssetEntry = 0;
-      }
-      mintAssetEntry = mintAssetEntry + 1;
-      addressEntry[mintAsset] = mintAssetEntry;
-
-      newDb.minters[asset] = address;
     } else if (type === 'price') {
       const {asset, price} = payloadJson;
 
@@ -1417,7 +1445,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
-    } else if (type === 'mint' || type === 'get') {
+    } else if (type === 'mint') {
       const {asset, quantity, publicKey} = payloadJson;
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const address = _getAddressFromPublicKey(publicKeyBuffer);
@@ -1433,6 +1461,39 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       }
       assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
+    } else if (type === 'get') {
+      const {addres, asset, quantity, publicKey} = payloadJson
+
+      let addressEntry = newDb.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        newDb.balances[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry = assetEntry + quantity;
+      addressEntry[asset] = assetEntry;
+    } else if (type === 'minter') {
+      const {asset, publicKey} = payloadJson;
+      const mintAsset = asset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let addressEntry = newDb.balances[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        newDb.balances[address] = addressEntry;
+      }
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
+      }
+      mintAssetEntry = mintAssetEntry + 1;
+      addressEntry[mintAsset] = mintAssetEntry;
+
+      newDb.minters[asset] = address;
     } else {
       throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
     }
