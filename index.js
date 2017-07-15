@@ -314,11 +314,11 @@ class Message {
               }
             }
             case 'minter': {
-              const {asset, address, publicKey} = payloadJson;
+              const {asset, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (_isBaseAsset(asset)) {
                   const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
@@ -344,13 +344,14 @@ class Message {
               }
             }
             case 'mint': {
-              const {asset, quantity, address, publicKey} = payloadJson;
+              const {asset, quantity, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === address) {
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
                 if (_isValidAsset(asset)) {
                   if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const address = _getAddressFromPublicKey(publicKeyBuffer);
                     const baseAsset = _getBaseAsset(asset);
                     const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
 
@@ -1222,8 +1223,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.minters[baseAsset] = dstAddress;
       }
     } else if (type === 'minter') {
-      const {asset, address} = payloadJson;
+      const {asset, publicKey} = payloadJson;
       const mintAsset = asset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
@@ -1243,10 +1246,12 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
 
       newDb.prices[asset] = price;
     } else if (type === 'buy') {
-      const {asset, quantity, price} = payloadJson;
-      const minter = newDb.minters[asset];
+      const {asset, quantity, price, publicKey} = payloadJson;
+      const srcAddress = newDb.minters[asset];
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
-      let srcAddressEntry = newDb.balances[minter];
+      let srcAddressEntry = newDb.balances[srcAddress];
       if (srcAddressEntry === undefined){
         srcAddressEntry = {};
         newDb.balances[srcAddress] = srcAddressEntry;
@@ -1276,7 +1281,9 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
       dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint') {
-      const {asset, quantity, address} = payloadJson;
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
@@ -2089,7 +2096,7 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createMinter = ({address, asset, startHeight, timestamp, privateKey}) => {
+  const _createMinter = ({asset, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
@@ -2143,11 +2150,11 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createMint = ({asset, quantity, address, startHeight, timestamp, privateKey}) => {
+  const _createMint = ({asset, quantity, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'mint', asset, quantity, address, publicKey: publicKeyString, startHeight, timestamp});
+    const payload = JSON.stringify({type: 'mint', asset, quantity, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2459,11 +2466,11 @@ const _listen = () => {
           });
       },
       minter: args => {
-        const [address, asset, privateKey] = args;
+        const [asset, privateKey] = args;
         const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
-        _createMinter({address, asset, startHeight, timestamp, privateKey})
+        _createMinter({asset, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
@@ -2508,12 +2515,12 @@ const _listen = () => {
           });
       },
       mint: args => {
-        const [asset, quantityString, address, privateKey] = args;
+        const [asset, quantityString, privateKey] = args;
         const quantityNumber = parseFloat(quantityString);
         const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
-        _createMint({asset, quantity: quantityNumber, address, startHeight, timestamp, privateKey})
+        _createMint({asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
