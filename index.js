@@ -2660,9 +2660,18 @@ const _listen = () => {
         process.stdout.write('> ');
       },
       minters: args => {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        console.log(JSON.stringify(db.minters, null, 2));
-        process.stdout.write('> ');
+        const [asset] = args;
+
+        if (asset) {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const minter = _getUnconfirmedMinter(db, mempool, [], asset);
+          console.log(JSON.stringify(minter, null, 2));
+          process.stdout.write('> ');
+        } else {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          console.log(JSON.stringify(db.minters, null, 2));
+          process.stdout.write('> ');
+        }
       },
       send: args => {
         const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
@@ -2708,9 +2717,18 @@ const _listen = () => {
           });
       },
       prices: args => {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        console.log(JSON.stringify(db.prices, null, 2));
-        process.stdout.write('> ');
+        const [asset] = args;
+
+        if (asset) {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const price = _getUnconfirmedPrice(db, mempool, [], asset);
+          console.log(JSON.stringify(price, null, 2));
+          process.stdout.write('> ');
+        } else {
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          console.log(JSON.stringify(db.prices, null, 2));
+          process.stdout.write('> ');
+        }
       },
       buy: args => {
         const [asset, quantity, privateKey] = args;
