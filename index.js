@@ -140,7 +140,7 @@ class Block {
     };
     const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
     const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
-    const _checkSufficientDifficulty = () => this.difficulty >= Math.max(_getNextBlockBaseDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY);
+    const _checkSufficientDifficulty = () => this.difficulty >= (Math.max(_getNextBlockBaseDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY));
     const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
     const _verifyMessages = () => {
       for (let i = 0; i < this.messages.length; i++) {
@@ -1555,46 +1555,38 @@ const _getNextBlockMinTimestamp = blocks => {
   return medianTimestamp;
 };
 const _getNextBlockBaseDifficulty = blocks => {
-  const initialBlocks = (() => {
-    const result = [];
-
-    const numInitialBlocks = Math.max(TARGET_BLOCKS - blocks.length, 0);
-    const now = Date.now();
-    for (let i = 0; i < numInitialBlocks; i++) {
-      const distance = numInitialBlocks - i;
-
-      result.push({
-        difficulty: initialDifficulty,
-        timestamp: now - ((TARGET_TIME / TARGET_BLOCKS) * distance),
-      });
-    }
-
-    return result;
-  })();
-  const checkBlocks = initialBlocks.concat(blocks.slice(-TARGET_BLOCKS));
+  const checkBlocks = blocks.slice(-TARGET_BLOCKS);
   const checkBlocksTimeDiff = (() => {
-    let firstCheckBlock = null;
-    let lastCheckBlock = null;
-    for (let i = 0; i < checkBlocks.length; i++) {
-      const checkBlock = checkBlocks[i];
+    if (checkBlocks.length > 0) {
+      let firstCheckBlock = null;
+      let lastCheckBlock = null;
+      for (let i = 0; i < checkBlocks.length; i++) {
+        const checkBlock = checkBlocks[i];
 
-      if (firstCheckBlock === null || checkBlock.timestamp < firstCheckBlock.timestamp) {
-        firstCheckBlock = checkBlock;
+        if (firstCheckBlock === null || checkBlock.timestamp < firstCheckBlock.timestamp) {
+          firstCheckBlock = checkBlock;
+        }
+        if (lastCheckBlock === null || checkBlock.timestamp > lastCheckBlock.timestamp) {
+          lastCheckBlock = checkBlock;
+        }
       }
-      if (lastCheckBlock === null || checkBlock.timestamp > lastCheckBlock.timestamp) {
-        lastCheckBlock = checkBlock;
-      }
+      return lastCheckBlock.timestamp - firstCheckBlock.timestamp;
+    } else {
+      return 0;
     }
-    return lastCheckBlock.timestamp - firstCheckBlock.timestamp;
   })();
   const expectedTimeDiff = TARGET_TIME;
   const averageDifficulty = (() => {
-    let acc = 0;
-    for (let i = 0; i < checkBlocks.length; i++) {
-      const checkBlock = checkBlocks[i];
-      acc += checkBlock.difficulty;
+    if (checkBlocks.length > 0) {
+      let acc = 0;
+      for (let i = 0; i < checkBlocks.length; i++) {
+        const checkBlock = checkBlocks[i];
+        acc += checkBlock.difficulty;
+      }
+      return acc / checkBlocks.length;
+    } else {
+      return 0;
     }
-    return acc / checkBlocks.length;
   })();
   const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
   const newDifficulty = Math.max(averageDifficulty / accuracyFactor, MIN_DIFFICULTY);
