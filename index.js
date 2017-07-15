@@ -876,7 +876,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       dstAddressEntry[asset] = dstAssetEntry + quantity;
     } else if (type === 'buy') {
       const {asset, quantity, price, publicKey} = payloadJson;
-      const srcAddress = newDb.minters[asset];
+      const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
@@ -999,7 +999,7 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       }
     } else if (type === 'buy') {
       const {asset, quantity, price, publicKey} = payloadJson;
-      const srcAddress = newDb.minters[asset];
+      const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
@@ -1102,7 +1102,7 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
         }
       }
     } else if (type === 'buy') {
-      if (asset === 'CRD') {
+      if (asset === CRD) {
         const {asset: localAddress} = payloadJson;
 
         if (address === localAddress) {
