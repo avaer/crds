@@ -55,7 +55,6 @@ const DEFAULT_MEMPOOL = {
   blocks: [],
   messages: [],
 };
-const fsSymbol = Symbol();
 
 const args = process.argv.slice(2);
 const _findArg = name => {
@@ -480,37 +479,6 @@ class Message {
                   return {
                     status: 400,
                     error: 'invalid asset',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'invalid signature',
-                };
-              }
-            }
-            case 'data': {
-              const {asset, data, publicKey} = payloadJson;
-              const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const signatureBuffer = new Buffer(signature, 'base64');
-
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                const address = _getAddressFromPublicKey(publicKeyBuffer);
-                const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
-
-                if (minter === address) {
-                  if (data.length < 256) {
-                    return null;
-                  } else {
-                    return {
-                      status: 400,
-                      stack: 'data too large',
-                    };
-                  }
-                } else {
-                  return {
-                    status: 400,
-                    stack: 'address is not minter of this asset',
                   };
                 }
               } else {
@@ -1003,38 +971,6 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
 
   return result;
 };
-const _requestConfirmedAssetData = asset => new Promise((accept, reject) => {
-  const rs = fs.createReadStream(path.join(fsDataPath, asset));
-  rs.on('open', () => {
-    accept(rs);
-  });
-  rs.on('error', err => {
-    if (err.code === 'ENOENT') {
-      accept(null);
-    } else {
-      reject(err);
-    }
-  });
-});
-const _requestUnconfirmedAssetData = (mempool, asset) => _requestConfirmedAssetData(asset)
-  .then(rs => {
-    if (rs) {
-      return Promise.resolve(rs);
-    } else {
-      let payloadJson = null;
-      const message = mempool.messages.find(message => {
-        payloadJson = JSON.parse(message.payload);
-        return payloadJson.type === 'data' && payloadJson.asset === asset;
-      });
-      if (message) {
-        const rs = new stream.PassThrough();
-        rs.end(payloadJson.data);
-        return Promise.resolve(rs);
-      } else {
-        return Promise.resolve(null);
-      }
-    }
-  });
 const _getConfirmedMinter = (db, confirmingMessages, asset) => {
   let minter = db.minters[asset];
   minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
@@ -1357,20 +1293,6 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       throw new Error('internal error: committing a block with unknown message type ' + JSON.stringify(type));
     }
   }
-
-  // decorate with fs data so it's saved first
-  const fsData = {};
-  for (let i = 0; i < block.messages.length; i++) {
-    const message = block.messages[i];
-    const {playload} = message;
-    const payloadJson = JSON.parse(payload);
-    const {type} = payloadJson;
-    if (type === 'data') {
-      const {asset, data} = payloadJson;
-      fsData[asset] = data;
-    }
-  }
-  newDb[fsSymbol] = fsData;
 
   // update message revocations
   newDb.messageHashes.push(block.messages.map(({hash}) => hash));
@@ -1912,29 +1834,7 @@ const _ensureDataPaths = () => {
 };
 const _saveState = (() => {
   const _doSave = cb => {
-    const _writeNewFsFiles = () => {
-      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-      const {[fsSymbol]: fsData} = db;
-
-      if (fsData) {
-        return Promise.all(Object.keys(fsData).map(asset => new Promise((accept, reject) => {
-          const data = fsData[asset];
-          writeFileAtomic(path.join(fsDataPath, asset), data, err => {
-            if (!err) {
-              accept();
-            } else {
-              reject(err);
-            }
-          });
-        })))
-          .then(() => {
-            db[fsSymbol] = null; // memory optimization
-          });
-      } else {
-        return Promise.resolve();
-      }
-    };
-    const _writeNewDbBlockFiles = () => {
+    const _writeNewFiles = () => {
       const promises = [];
       const _writeFile = (p, d) => new Promise((accept, reject) => {
         writeFileAtomic(p, d, err => {
@@ -1960,7 +1860,7 @@ const _saveState = (() => {
 
       return Promise.all(promises);
     };
-    const _removeOldDbBlockFiles = () => {
+    const _removeOldFiles = () => {
       const _removeDbFiles = () => new Promise((accept, reject) => {
         fs.readdir(dbDataPath, (err, dbFiles) => {
           if (!err || err.code === 'ENOENT') {
@@ -2053,8 +1953,7 @@ const _saveState = (() => {
     };
 
     _writeNewFiles()
-      .then(() => _writeNewDbBlockFiles())
-      .then(() => _removeOldDbBlockFiles())
+      .then(() => _removeOldFiles())
       .then(() => {
         cb();
       })
@@ -2227,24 +2126,6 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createData = ({asset, data, startHeight, timestamp, privateKey}) => {
-    const privateKeyBuffer = new Buffer(privateKey, 'base64');
-    const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'data', asset, data, publicKey: publicKeyString, startHeight, timestamp});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
   const _createPrice = ({asset, price, startHeight, timestamp, privateKey}) => {
     const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
@@ -2358,34 +2239,6 @@ const _listen = () => {
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const price = _getUnconfirmedPrice(db, mempool, [], asset);
       res.json(price);
-    });
-    app.get('/data/:asset', cors, (req, res, next) => {
-      const {asset} = req.params;
-      _requestConfirmedAssetData(asset)
-        .then(rs => {
-          res.type('application/octet-stream');
-          rs.pipe(res);
-        })
-        .catch(err =>  {
-          res.status(500);
-          res.json({
-            error: err.stack,
-          });
-        });
-    });
-    app.get('/unconfirmedData/:asset', cors, (req, res, next) => {
-      const {asset} = req.params;
-      _requestUnconfirmedAssetData(asset)
-        .then(rs => {
-          res.type('application/octet-stream');
-          rs.pipe(res);
-        })
-        .catch(err =>  {
-          res.status(500);
-          res.json({
-            error: err.stack,
-          });
-        });
     });
     app.post('/submitMessage', cors, bodyParserJson, (req, res, next) => {
       const {body} = req;
@@ -2627,20 +2480,6 @@ const _listen = () => {
         const timestamp = Date.now();
 
         _createMinter({address, asset, startHeight, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      data: args => {
-        const [asset, data, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createData({asset, data, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
