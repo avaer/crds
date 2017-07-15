@@ -1525,31 +1525,20 @@ const _addMessage = (db, blocks, mempool, message) => {
 };
 
 const _getNextBlockMinTimestamp = blocks => {
-  const initialBlocks = (() => {
-    const result = [];
-
-    const numInitialBlocks = Math.max(TARGET_BLOCKS - blocks.length, 0);
-    const now = Date.now();
-    for (let i = 0; i < numInitialBlocks; i++) {
-      const distance = numInitialBlocks - i;
-
-      result.push({
-        timestamp: now - ((TARGET_TIME / TARGET_BLOCKS) * distance),
-      });
-    }
-
-    return result;
-  })();
-  const checkBlocks = initialBlocks.concat(blocks.slice(-TARGET_BLOCKS));
+  const checkBlocks = blocks.slice(-TARGET_BLOCKS);
   const sortedCheckBlocks = checkBlocks.slice()
     .sort((a, b) => a.timestamp - b.timestamp);
   const medianTimestamp = (() => {
-    const middleIndex = Math.floor((sortedCheckBlocks.length - 1) / 2);
+    if (sortedCheckBlocks.length > 0) {
+      const middleIndex = Math.floor((sortedCheckBlocks.length - 1) / 2);
 
-    if (sortedCheckBlocks.length % 2) {
-        return sortedCheckBlocks[middleIndex].timestamp;
+      if (sortedCheckBlocks.length % 2) {
+          return sortedCheckBlocks[middleIndex].timestamp;
+      } else {
+          return (sortedCheckBlocks[middleIndex].timestamp + sortedCheckBlocks[middleIndex + 1].timestamp) / 2;
+      }
     } else {
-        return (sortedCheckBlocks[middleIndex].timestamp + sortedCheckBlocks[middleIndex + 1].timestamp) / 2;
+      return 0;
     }
   })();
   return medianTimestamp;
