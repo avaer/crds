@@ -47,8 +47,8 @@ const DEFAULT_DB = {
   minters: {
     [CRD]: null,
   },
-  freeMinters: {
-    CRD: false,
+  prices: {
+    CRD: Infinity,
   },
 };
 const DEFAULT_MEMPOOL = {
@@ -358,14 +358,14 @@ class Message {
                     if (minter === address) {
                       return null;
                     } else {
-                      const isFreeMinter = !mempool ? _isConfirmedFreeMinter(db, confirmingMessages, baseAsset) : _isUnconfirmedFreeMinter(db, mempool, confirmingMessages, baseAsset);
+                      const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
 
-                      if (isFreeMinter) {
+                      if (price > 0) {
                         return null;
                       } else {
                         return {
                           status: 400,
-                          stack: 'address is not minter of this asset',
+                          stack: 'address cannot mint this asset',
                         };
                       }
                     }
@@ -388,8 +388,8 @@ class Message {
                 };
               }
             }
-            case 'free': {
-              const {asset, publicKey} = payloadJson;
+            case 'price': {
+              const {asset, price, publicKey} = payloadJson;
               const publicKeyBuffer = new Buffer(publicKey, 'base64');
               const signatureBuffer = new Buffer(signature, 'base64');
 
@@ -399,38 +399,14 @@ class Message {
                   const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
 
                   if (minter === address) {
-                    return null;
-                  } else {
-                    return {
-                      status: 400,
-                      stack: 'address is not minter of this asset',
-                    };
-                  }
-                } else {
-                  return {
-                    status: 400,
-                    error: 'invalid asset',
-                  };
-                }
-              } else {
-                return {
-                  status: 400,
-                  error: 'invalid signature',
-                };
-              }
-            }
-            case 'unfree': {
-              const {asset, address, publicKey} = payloadJson;
-              const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const signatureBuffer = new Buffer(signature, 'base64');
-
-              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                if (_isBaseAsset(asset)) {
-                  const address = _getAddressFromPublicKey(publicKeyBuffer);
-                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
-
-                  if (minter === address) {
-                    return null;
+                    if (isFinite(price) && price >= 0 && Math.floor(price) === price) {
+                      return null;
+                    } else {
+                      return {
+                        status: 400,
+                        stack: 'invalid price',
+                      };
+                    }
                   } else {
                     return {
                       status: 400,
@@ -1046,50 +1022,34 @@ const _getPostMessagesMinter = (minter, asset, messages) => {
 
   return minter;
 };
-const _isConfirmedFreeMinter = (db, confirmingMessages, asset) => {
-  let freeMinter = db.freeMinters[asset] || !db.minters[asset];
-  freeMinter = _getPostMessagesFreeMinter(freeMinter, asset, confirmingMessages);
-  return freeMinter;
+const _getConfirmedPrice = (db, confirmingMessages, asset) => {
+  let price = db.prices[asset] || (db.minters[asset] ? Infinity : 0);
+  price = _getPostMessagesPrice(price, asset, confirmingMessages);
+  return price;
 };
-const _isUnconfirmedFreeMinter = (db, confirmingMessages, asset) => {
-  let freeMinter = _isConfirmedFreeMinter(db, confirmingMessages, asset);
-  freeMinter = _getPostMessagesMinter(freeMinter, asset, mempool.messages);
-  return freeMinter;
+const _getUnconfirmedPrice = (db, confirmingMessages, asset) => {
+  let price = _getConfirmedPrice(db, confirmingMessages, asset);
+  price = _getPostMessagesPrice(price, asset, mempool.messages);
+  return price;
 };
-const _getPostMessagesFreeMinter = (freeMinter, asset, messages) => {
-  const freeMessages = messages.filter(message => {
+const _getPostMessagesPrice = (price, asset, messages) => {
+  const priceMessages = messages.filter(message => {
     const payloadJson = JSON.parse(message.payload);
-    return (payloadJson.type === 'free' || payloadJson.type === 'unfree') && payloadJson.asset === asset;
+    return payloadJson.type === 'price' && payloadJson.asset === asset;
   });
 
   let done = false;
-  while (freeMessages.length > 0 && !done) {
+  while (priceMessages.length > 0 && !done) {
     done = true;
 
-    for (let i = 0; i < freeMessages.length; i++) {
+    for (let i = 0; i < priceMessages.length; i++) {
       const message = mintMessages[i];
       const payloadJson = JSON.parse(message.payload);
-      const {type} = payloadJson;
-
-      if (type === 'free') {
-        if (!freeMinter) {
-          freeMinter = true;
-          done = false;
-          freeMessages.splice(i, 1);
-          break;
-        }
-      } else if (type === 'unfree') {
-        if (freeMinter) {
-          freeMinter = false;
-          freeMessages.splice(i, 1);
-          done = false;
-          break;
-        }
-      }
+      price = payloadJson.price;
     }
   }
 
-  return freeMinter;
+  return price;
 };
 const _checkBlockExists = (blocks, mempool, block) => {
   const checkBlockIndex = block.height - 1;
@@ -1283,14 +1243,10 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       addressEntry[mintAsset] = mintAssetEntry;
 
       newDb.minters[asset] = address;
-    } else if (type === 'free') {
+    } else if (type === 'price') {
       const {asset} = payloadJson;
 
-      newDb.freeMinters[asset] = true;
-    } else if (type === 'unfree') {
-      const {asset} = payloadJson;
-
-      delete newDb.freeMinters[asset];
+      newDb.prices[asset] = true;
     } else if (type === 'mint') {
       const {asset, quantity, address} = payloadJson;
 
@@ -2159,7 +2115,7 @@ const _listen = () => {
     }
   };
   const _createMinter = ({address, asset, startHeight, timestamp, privateKey}) => {
-    const privdsdfeyBuffer = new Buffer(privateKey, 'base64');
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
     const payload = JSON.stringify({type: 'minter', address, asset, publicKey: publicKeyString, startHeight, timestamp});
@@ -2194,29 +2150,11 @@ const _listen = () => {
       return Promise.reject(error);
     }
   };
-  const _createFree = ({asset, startHeight, timestamp, privateKey}) => {
-    const privdsdfeyBuffer = new Buffer(privateKey, 'base64');
+  const _createPrice = ({asset, price, startHeight, timestamp, privateKey}) => {
+    const privateKeyBuffer = new Buffer(privateKey, 'base64');
     const publicKey = eccrypto.getPublic(privateKeyBuffer);
     const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'free', asset, publicKey: publicKeyString, startHeight, timestamp});
-    const payloadHash = crypto.createHash('sha256').update(payload).digest();
-    const payloadHashString = payloadHash.toString('hex');
-    const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
-    const signatureString = signature.toString('base64');
-    const message = new Message(payload, payloadHashString, signatureString);
-    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-    const error = _addMessage(db, blocks, mempool, message);
-    if (!error) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject(error);
-    }
-  };
-  const _createUnfree = ({asset, startHeight, timestamp, privateKey}) => {
-    const privdsdfeyBuffer = new Buffer(privateKey, 'base64');
-    const publicKey = eccrypto.getPublic(privateKeyBuffer);
-    const publicKeyString = publicKey.toString('base64');
-    const payload = JSON.stringify({type: 'unfree', asset, publicKey: publicKeyString, startHeight, timestamp});
+    const payload = JSON.stringify({type: 'price', asset, price, publicKey: publicKeyString, startHeight, timestamp});
     const payloadHash = crypto.createHash('sha256').update(payload).digest();
     const payloadHashString = payloadHash.toString('hex');
     const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
@@ -2587,26 +2525,12 @@ const _listen = () => {
             console.warn(err);
           });
       },
-      free: args => {
-        const [asset, privateKey] = args;
+      price: args => {
+        const [asset, price, privateKey] = args;
         const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
-        _createFree({asset, startHeight, timestamp, privateKey})
-          .then(() => {
-            console.log('ok');
-            process.stdout.write('> ');
-          })
-          .catch(err => {
-            console.warn(err);
-          });
-      },
-      unfree: args => {
-        const [asset, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-        const timestamp = Date.now();
-
-        _createUnfree({asset, startHeight, timestamp, privateKey})
+        _createPrice({asset, price, startHeight, timestamp, privateKey})
           .then(() => {
             console.log('ok');
             process.stdout.write('> ');
