@@ -2452,7 +2452,7 @@ const _listen = () => {
       },
       send: args => {
         const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
-        const quantityNumber = parseFloat(quantityString);
+        const quantityNumber = parseInt(quantityString, 10);
         const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
@@ -2516,7 +2516,7 @@ const _listen = () => {
       },
       mint: args => {
         const [asset, quantityString, privateKey] = args;
-        const quantityNumber = parseFloat(quantityString);
+        const quantityNumber = parseInt(quantityString, 10);
         const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
