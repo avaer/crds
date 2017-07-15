@@ -2347,6 +2347,18 @@ const _listen = () => {
       const balance = _getUnconfirmedBalance(db, mempool, address, asset);
       res.json(balance);
     });
+    app.get('/price/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const price = _getConfirmedPrice(db, [], asset);
+      res.json(price);
+    });
+    app.get('/unconfirmedPrice/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const price = _getUnconfirmedPrice(db, mempool, [], asset);
+      res.json(price);
+    });
     app.get('/data/:asset', cors, (req, res, next) => {
       const {asset} = req.params;
       _requestConfirmedAssetData(asset)
@@ -2590,7 +2602,6 @@ const _listen = () => {
         process.stdout.write('> ');
       },
       minters: args => {
-        const [asset] = args;
         const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
         console.log(JSON.stringify(db.minters, null, 2));
         process.stdout.write('> ');
@@ -2651,6 +2662,11 @@ const _listen = () => {
           .catch(err => {
             console.warn(err);
           });
+      },
+      prices: args => {
+        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        console.log(JSON.stringify(db.prices, null, 2));
+        process.stdout.write('> ');
       },
       buy: args => {
         const [asset, quantity, privateKey] = args;
