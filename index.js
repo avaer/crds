@@ -874,6 +874,41 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         dstAssetEntry = 0;
       }
       dstAddressEntry[asset] = dstAssetEntry + quantity;
+    } else if (type === 'buy') {
+      const {asset, quantity, price, publicKey} = payloadJson;
+      const srcAddress = newDb.minters[asset];
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let srcAddressEntry = result[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        result[srcAddress] = srcAddressEntry;
+      }
+      let srcAddressDstAssetEntry = srcAddressEntry[CRD];
+      if (srcAddressDstAssetEntry === undefined) {
+        srcAddressDstAssetEntry = 0;
+      }
+      srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
+      srcAddressEntry[CRD] = srcAddressDstAssetEntry;
+
+      let dstAddressEntry = result[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        result[dstAddress] = dstAddressEntry;
+      }
+      let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
+      if (dstAddressSrcAssetEntry === undefined) {
+        dstAddressSrcAssetEntry = 0;
+      }
+      dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
+      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
+      let dstAddressDstAssetEntry = dstAddressEntry[asset];
+      if (dstAddressDstAssetEntry === undefined) {
+        dstAddressDstAssetEntry = 0;
+      }
+      dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
+      dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint' || type === 'get') {
       const {address, asset, quantity} = payloadJson;
 
@@ -944,6 +979,41 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
         }
         result[asset] = dstAssetEntry + quantity;
       }
+    } else if (type === 'buy') {
+      const {asset, quantity, price, publicKey} = payloadJson;
+      const srcAddress = newDb.minters[asset];
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let srcAddressEntry = result[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        result[srcAddress] = srcAddressEntry;
+      }
+      let srcAddressDstAssetEntry = srcAddressEntry[CRD];
+      if (srcAddressDstAssetEntry === undefined) {
+        srcAddressDstAssetEntry = 0;
+      }
+      srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
+      srcAddressEntry[CRD] = srcAddressDstAssetEntry;
+
+      let dstAddressEntry = result[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        result[dstAddress] = dstAddressEntry;
+      }
+      let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
+      if (dstAddressSrcAssetEntry === undefined) {
+        dstAddressSrcAssetEntry = 0;
+      }
+      dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
+      dstAddressEntry[asset] = dstAddressSrcAssetEntry;
+      let dstAddressDstAssetEntry = dstAddressEntry[asset];
+      if (dstAddressDstAssetEntry === undefined) {
+        dstAddressDstAssetEntry = 0;
+      }
+      dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
+      dstAddressEntry[asset] = dstAddressDstAssetEntry;
     } else if (type === 'mint' || type === 'get') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
@@ -995,6 +1065,29 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
           result = result - quantity;
         }
         if (dstAddress === address) {
+          result = result + quantity;
+        }
+      }
+    } else if (type === 'buy') {
+      if (asset === 'CRD') {
+        const {asset: localAddress} = payloadJson;
+
+        if (address === localAddress) {
+          result = result - (price * quantity);
+        } else {
+          const {asset: localAsset} = payloadJson;
+          const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
+
+          if (minter === address) {
+            const {quantity, price} = payloadJson;
+            result = result + (price * quantity);
+          }
+        }
+      } else {
+        const {address: localAddress, asset: localAsset} = payloadJson;
+
+        if (address === localAddress && asset === localAsset) {
+          const {quantity, price} = payloadJson;
           result = result + quantity;
         }
       }
