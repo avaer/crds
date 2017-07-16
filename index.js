@@ -349,7 +349,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                if (_isValidAsset(asset)) {
+                if (_isBasicAsset(asset)) {
                   if (quantity > 0 && Math.floor(quantity) === quantity) {
                     const address = _getAddressFromPublicKey(publicKeyBuffer);
                     const baseAsset = _getBaseAsset(asset);
@@ -394,7 +394,7 @@ class Message {
               const signatureBuffer = new Buffer(signature, 'base64');
 
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                if (_isValidAsset(asset)) {
+                if (_isBasicAsset(asset)) {
                   if (quantity > 0 && Math.floor(quantity) === quantity) {
                     const baseAsset = _getBaseAsset(asset);
                     const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
@@ -796,7 +796,8 @@ class Peer {
 const _clone = o => JSON.parse(JSON.stringify(o));
 const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
 const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
-const _isValidAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?$/.test(asset);
+const _isValidAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?(?::mint)?$/.test(asset);
+const _isBasicAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?$/.test(asset);
 const _isBaseAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+$/.test(asset);
 const _getBaseAsset = asset => asset.match(/^((?:[A-Z0-9]|(?!^)\-(?!$))+)/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
