@@ -1064,11 +1064,16 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         result[address] = addressEntry;
       }
       let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
       assetEntry = assetEntry - quantity;
-      addressEntry[asset] = assetEntry;
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete result[address];
+        }
+      }
     } else if (type === 'drop') {
       const {address, asset, quantity} = payloadJson;
 
@@ -1078,11 +1083,16 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
         result[address] = addressEntry;
       }
       let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
       assetEntry = assetEntry - quantity;
-      addressEntry[asset] = asset
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete result[address];
+        }
+      }
     } else if (type === 'minter') {
       const {asset, publicKey} = payloadJson;
       const mintAsset = asset + ':mint';
@@ -1199,22 +1209,24 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
 
       if (localAddress === address) {
         let assetEntry = result[asset];
-        if (assetEntry === undefined) {
-          assetEntry = 0;
-        }
         assetEntry = assetEntry - quantity;
-        result[asset] = assetEntry;
+        if (assetEntry > 0) {
+          result[asset] = assetEntry;
+        } else {
+          delete result[asset];
+        }
       }
     } else if (type === 'drop') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
       if (localAddress === address) {
         let assetEntry = result[asset];
-        if (assetEntry === undefined) {
-          assetEntry = 0;
-        }
         assetEntry = assetEntry - quantity;
-        result[asset] = assetEntry;
+        if (assetEntry > 0) {
+          result[asset] = assetEntry;
+        } else {
+          delete result[asset];
+        }
       }
     } else if (type === 'minter') {
       const {asset, publicKey} = payloadJson;
@@ -1657,11 +1669,16 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.balances[address] = addressEntry;
       }
       let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
       assetEntry = assetEntry - quantity;
-      addressEntry[asset] = assetEntry;
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete newDb.balances[address];
+        }
+      }
     } else if (type === 'drop') {
       const {address, asset, quantity} = payloadJson
 
@@ -1671,11 +1688,16 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
         newDb.balances[address] = addressEntry;
       }
       let assetEntry = addressEntry[asset];
-      if (assetEntry === undefined) {
-        assetEntry = 0;
-      }
       assetEntry = assetEntry - quantity;
-      addressEntry[asset] = assetEntry;
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete newDb.balances[address];
+        }
+      }
     } else if (type === 'minter') {
       const {asset, publicKey} = payloadJson;
       const mintAsset = asset + ':mint';
