@@ -1633,7 +1633,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       assetEntry = assetEntry + quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'get') {
-      const {addres, asset, quantity} = payloadJson
+      const {address, asset, quantity} = payloadJson
 
       let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
@@ -1663,7 +1663,7 @@ const _commitMainChainBlock = (db, blocks, mempool, block) => {
       assetEntry = assetEntry - quantity;
       addressEntry[asset] = assetEntry;
     } else if (type === 'drop') {
-      const {addres, asset, quantity} = payloadJson
+      const {address, asset, quantity} = payloadJson
 
       let addressEntry = newDb.balances[address];
       if (addressEntry === undefined){
