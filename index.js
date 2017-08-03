@@ -2693,6 +2693,18 @@ const _listen = () => {
       const balance = _getUnconfirmedBalance(db, mempool, address, asset);
       res.json(balance);
     });
+    app.get('/minter/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const minter = _getConfirmedMinter(db, [], asset);
+      res.json(minter);
+    });
+    app.get('/unconfirmedMinter/:asset', cors, (req, res, next) => {
+      const {asset} = req.params;
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const minter = _getUnconfirmedMinter(db, mempool, [], asset);
+      res.json(minter);
+    });
     app.get('/price/:asset', cors, (req, res, next) => {
       const {asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
