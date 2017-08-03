@@ -2664,6 +2664,11 @@ const _listen = () => {
         timestamp,
       });
     });
+    app.get('/assets', cors, (req, res, next) => {
+      const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+      const assets = Object.keys(db.minters);
+      res.json(assets);
+    });
     app.get('/balances/:address', cors, (req, res, next) => {
       const {address} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
