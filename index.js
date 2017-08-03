@@ -2896,11 +2896,23 @@ const _listen = () => {
         process.stdout.write('> ');
       },
       getaddress: args => {
-        const [privateKey] = args;
-        const privateKeyBuffer = new Buffer(privateKey, 'base64');
+        const privateKeyBuffer = crypto.randomBytes(32);
         const address = _getAddressFromPrivateKey(privateKeyBuffer);
-        console.log(address);
+        console.log(`PrivateKey: ${privateKeyBuffer.toString('base64')} Address: ${address}`);
         process.stdout.write('> ');
+      },
+      parseaddress: args => {
+        const [privateKey] = args;
+
+        if (privateKey) {
+          const privateKeyBuffer = new Buffer(privateKey, 'base64');
+          const address = _getAddressFromPrivateKey(privateKeyBuffer);
+          console.log(address);
+          process.stdout.write('> ');
+        } else {
+          console.log('Enter a private key');
+          process.stdout.write('> ')
+        }
       },
       balance: args => {
         const [address, asset] = args;
