@@ -1397,14 +1397,14 @@ const _getUnconfirmedPrice = (db, mempool, confirmingMessages, asset) => {
   return prices[prices.length - 1];
 };
 const _getConfirmedPrices = (db, confirmingMessages, asset) => {
-  let prices = [db.prices[asset] || (db.minters[asset] ? Infinity : 0)];
+  let prices = [typeof db.prices[asset] === 'number' ? db.prices[asset] : Infinity];
   prices = _getPostMessagesPrices(prices, asset, confirmingMessages);
-  return prices;
+  return prices.map(price => price !== null ? price : Infinity);
 };
 const _getUnconfirmedPrices = (db, mempool, confirmingMessages, asset) => {
   let prices = _getConfirmedPrices(db, confirmingMessages, asset);
   prices = _getPostMessagesPrices(prices, asset, mempool.messages);
-  return prices;
+  return prices.map(price => price !== null ? price : Infinity);
 };
 const _getPostMessagesPrices = (prices, asset, messages) => prices
   .concat(
