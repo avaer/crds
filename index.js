@@ -21,6 +21,7 @@ const bigint = require('big-integer');
 const base58 = require('bs58');
 const eccrypto = require('eccrypto-sync');
 
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
 const BLOCK_VERSION = '0.0.1';
 const MESSAGE_TTL = 10;
 const UNDO_HEIGHT = 10;
@@ -3139,6 +3140,9 @@ const _listen = () => {
         process.stdout.write('> ');
       },
     };
+
+    console.log(`CRDS blockchain ${VERSION}`);
+    console.log(`Type 'help' for help.`);
 
     const r = repl.start({
       prompt: '> ',
