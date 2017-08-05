@@ -3106,6 +3106,7 @@ const _listen = () => {
           process.stdout.write('> ');
         } else {
           console.warn('invalid public key');
+          process.stdout.write('> ');
         }
       },
       stopmine: args => {
