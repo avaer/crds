@@ -2645,18 +2645,16 @@ const _listen = () => {
   const _requestServer = () => new Promise((accept, reject) => {
     const app = express();
 
-    const cors = (req, res, next) => {
-      res.set('Access-Control-Allow-Origin', req.get('Origin'));
-      res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      res.set('Access-Control-Allow-Credentials', true);
-
-      next();
-    };
-    app.options('*', cors, (req, res, next) => {
-      res.send();
+    app.all('*', (req, res, next) => {
+      if (/^(?:::ffff:)?127\.0\.0\.1$/.test(req.connection.remoteAddress)) {
+        next();
+      } else {
+        res.status(401);
+        res.send();
+      }
     });
 
-    app.get('/status', cors, (req, res, next) => {
+    app.get('/status', (req, res, next) => {
       const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
       const timestamp = Date.now();
 
@@ -2665,60 +2663,60 @@ const _listen = () => {
         timestamp,
       });
     });
-    app.get('/assets', cors, (req, res, next) => {
+    app.get('/assets', (req, res, next) => {
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const assets = Object.keys(db.minters);
       res.json(assets);
     });
-    app.get('/balances/:address', cors, (req, res, next) => {
+    app.get('/balances/:address', (req, res, next) => {
       const {address} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const balances = _getConfirmedBalances(db, address);
       res.json(balances);
     });
-    app.get('/balance/:address/:asset', cors, (req, res, next) => {
+    app.get('/balance/:address/:asset', (req, res, next) => {
       const {address, asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const balance = _getConfirmedBalance(db, address, asset);
       res.json(balance);
     });
-    app.get('/unconfirmedBalances/:address', cors, (req, res, next) => {
+    app.get('/unconfirmedBalances/:address', (req, res, next) => {
       const {address} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const balances = _getUnconfirmedBalances(db, mempool, address);
       res.json(balances);
     });
-    app.get('/unconfirmedBalance/:address/:asset', cors, (req, res, next) => {
+    app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
       const {address, asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const balance = _getUnconfirmedBalance(db, mempool, address, asset);
       res.json(balance);
     });
-    app.get('/minter/:asset', cors, (req, res, next) => {
+    app.get('/minter/:asset', (req, res, next) => {
       const {asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const minter = _getConfirmedMinter(db, [], asset);
       res.json(minter);
     });
-    app.get('/unconfirmedMinter/:asset', cors, (req, res, next) => {
+    app.get('/unconfirmedMinter/:asset', (req, res, next) => {
       const {asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const minter = _getUnconfirmedMinter(db, mempool, [], asset);
       res.json(minter);
     });
-    app.get('/price/:asset', cors, (req, res, next) => {
+    app.get('/price/:asset', (req, res, next) => {
       const {asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const price = _getConfirmedPrice(db, [], asset);
       res.json(price);
     });
-    app.get('/unconfirmedPrice/:asset', cors, (req, res, next) => {
+    app.get('/unconfirmedPrice/:asset', (req, res, next) => {
       const {asset} = req.params;
       const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
       const price = _getUnconfirmedPrice(db, mempool, [], asset);
       res.json(price);
     });
-    app.post('/submitMessage', cors, bodyParserJson, (req, res, next) => {
+    app.post('/submitMessage', bodyParserJson, (req, res, next) => {
       const {body} = req;
       const message = Message.from(body);
 
@@ -2737,7 +2735,7 @@ const _listen = () => {
         console.warn(errorString);
       }
     });
-    app.post('/mine', cors, bodyParserJson, (req, res, next) => {
+    app.post('/mine', bodyParserJson, (req, res, next) => {
       const {body} = req;
 
       if (body && body.address && typeof body.address === 'string') {
@@ -2760,10 +2758,10 @@ const _listen = () => {
         });
       }
     });
-    app.get('/minedBlocks', cors, bodyParserJson, (req, res, next) => {
+    app.get('/minedBlocks', bodyParserJson, (req, res, next) => {
       res.json(minedBlocks);
     });
-    app.get('/blocks/:height', cors, (req, res, next) => {
+    app.get('/blocks/:height', (req, res, next) => {
       const {height: heightStirng} = req.params;
       const height = parseInt(heightStirng, 10);
 
@@ -2802,20 +2800,20 @@ const _listen = () => {
         });
       }
     });
-    /* app.get('/blockcount', cors, (req, res, next) => {
+    /* app.get('/blockcount', (req, res, next) => {
       const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
 
       res.json({
         blockcount,
       });
     }); */
-    app.get('/blockcache', cors, (req, res, next) => {
+    app.get('/blockcache', (req, res, next) => {
       res.json(blocks);
     });
-    app.get('/mempool', cors, (req, res, next) => {
+    app.get('/mempool', (req, res, next) => {
       res.json(mempool);
     });
-    app.get('/peers', cors, (req, res, next) => {
+    app.get('/peers', (req, res, next) => {
       const urls = peers.map(({url}) => url);
 
       res.json(urls);
@@ -2872,7 +2870,9 @@ const _listen = () => {
 
       for (let i = 0; i < connections.length; i++) {
         const connection = connections[i];
-        connection.send(es);
+        if (connection.readyState === ws.OPEN) {
+          connection.send(es);
+        }
       }
     });
     api.on('message', message => {
@@ -2884,7 +2884,9 @@ const _listen = () => {
 
       for (let i = 0; i < connections.length; i++) {
         const connection = connections[i];
-        connection.send(es);
+        if (connection.readyState === ws.OPEN) {
+          connection.send(es);
+        }
       }
     });
     api.on('peer', peer => {
@@ -2896,7 +2898,9 @@ const _listen = () => {
 
       for (let i = 0; i < connections.length; i++) {
         const connection = connections[i];
-        connection.send(es);
+        if (connection.readyState === ws.OPEN) {
+          connection.send(es);
+        }
       }
      });
 
