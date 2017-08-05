@@ -2737,6 +2737,32 @@ const _listen = () => {
         console.warn(errorString);
       }
     });
+    app.post('/mine', cors, bodyParserJson, (req, res, next) => {
+      const {body} = req;
+
+      if (body && body.address && typeof body.address === 'string') {
+        const {address} = body;
+        _startMine(address);
+
+        res.json({
+          ok: true,
+        });
+      } else if (body && body.address === null) {
+        _stopMine();
+
+        res.json({
+          ok: true,
+        });
+      } else {
+        res.status(400);
+        res.json({
+          error: 'invalid address',
+        });
+      }
+    });
+    app.get('/minedBlocks', cors, bodyParserJson, (req, res, next) => {
+      res.json(minedBlocks);
+    });
     app.get('/blocks/:height', cors, (req, res, next) => {
       const {height: heightStirng} = req.params;
       const height = parseInt(heightStirng, 10);
@@ -3099,13 +3125,13 @@ const _listen = () => {
         process.stdout.write('> ');
       },
       startmine: args => {
-        const [publicKey] = args;
+        const [address] = args;
 
-        if (publicKey) {
-          _startMine(publicKey);
+        if (address) {
+          _startMine(address);
           process.stdout.write('> ');
         } else {
-          console.warn('invalid public key');
+          console.warn('invalid address');
           process.stdout.write('> ');
         }
       },
@@ -3189,6 +3215,7 @@ const _listen = () => {
 };
 
 let mineAddress = null;
+let minedBlocks = 0;
 let mineImmediate = null;
 const _mine = () => {
   doHash()
@@ -3203,6 +3230,7 @@ const _mine = () => {
         if (!error) {
           const difficulty = _getNextBlockBaseDifficulty(blocks);
           const timeTaken = timeDiff / 1000;
+          minedBlocks++;
           console.log('mined block', difficulty, timeTaken);
         } else {
           console.warn('add mined block error:', error);
