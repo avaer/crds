@@ -599,7 +599,7 @@ class Message {
                         const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
 
                         if (prices.includes(price)) {
-                          const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, address, CRD) : _getUnconfirmedBalance(db, confirmingMessages, mempool, address, CRD);
+                          const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, address, CRD) : _getUnconfirmedBalance(db, mempool, confirmingMessages, address, CRD);
 
                           if (balance >= (quantity * price)) {
                             return null;
@@ -3089,7 +3089,9 @@ const _getPostMessagesBalance = (balance, db, mempool, confirmingMessages, addre
         }
       }
     } else if (type === 'buy') {
-      const {address: localAddress, asset: localAsset} = payloadJson;
+      const {asset: localAsset, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (asset === CRD) {
         const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, localAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, localAsset);

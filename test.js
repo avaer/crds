@@ -98,6 +98,24 @@ const _makePriceMessage = (asset, price, privateKey) => {
   };
   return message;
 };
+const _makeBuyMessage = (asset, quantity, price, privateKey) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const publicKey = _getPublicKey(privateKey);
+  const publicKeyString = publicKey.toString('base64');
+  const payload = JSON.stringify({type: 'buy', asset, quantity, price, publicKey: publicKeyString, startHeight, timestamp});
+  const payloadBuffer = new Buffer(payload, 'utf8');
+  const payloadHash = _sha256(payloadBuffer);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
 const _resJson = res => {
   if (res.status >= 200 && res.status < 300) {
     return res.json();
@@ -527,6 +545,74 @@ describe('balances', () => {
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(undefined);
             expect(balances['ITEM.WOOD']).toBe(100);
+          }),
+      ]));
+  });
+
+  it('should buy priced asset', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: address2}),
+      })
+        .then(_resJson),
+    ])
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makePriceMessage('ITEM', 20, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeBuyMessage('ITEM', 2, 20, privateKey2)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM']).toBe(undefined);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address2}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address2}/ITEM`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(2);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address2}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM']).toBe(2);
           }),
       ]));
   });
