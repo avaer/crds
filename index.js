@@ -62,511 +62,546 @@ const DEFAULT_MEMPOOL = {
   messages: [],
 };
 
-class Crds {
-  constructor({
-    dataDirectory = DEFAULTS.dataDirectory,
-    cli = DEFAULTS.cli,
-  } = {}) {
-    this.dataDirectory = dataDirectory;
-    this.cli = cli;
+class Block {
+  constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
+    this.hash = hash;
+    this.prevHash = prevHash;
+    this.height = height;
+    this.difficulty = difficulty;
+    this.version = version;
+    this.timestamp = timestamp;
+    this.messages = messages;
+    this.nonce = nonce;
   }
 
-  listen({
-    host = DEFAULTS.host,
-    port = DEFAULTS.port,
-  } = {}) {
-    const {dataDirectory, cli} = this;
+  static from(o) {
+    const {hash, prevHash, height, difficulty, version, timestamp, messages, nonce} = o;
+    return new Block(hash, prevHash, height, difficulty, version, timestamp, messages.map(message => Message.from(message)), nonce);
+  }
 
-    const localUrl = `http://${host}:${port}`;
+  equals(block) {
+    return this.hash === block.hash;
+  }
 
-    class Block {
-      constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
-        this.hash = hash;
-        this.prevHash = prevHash;
-        this.height = height;
-        this.difficulty = difficulty;
-        this.version = version;
-        this.timestamp = timestamp;
-        this.messages = messages;
-        this.nonce = nonce;
-      }
+  getHash() {
+    const {prevHash, height, difficulty, version, timestamp, messages, nonce} = this;
+    const messagesJson = messages
+      .map(message => JSON.stringify(message))
+      .join('\n');
 
-      static from(o) {
-        const {hash, prevHash, height, difficulty, version, timestamp, messages, nonce} = o;
-        return new Block(hash, prevHash, height, difficulty, version, timestamp, messages.map(message => Message.from(message)), nonce);
-      }
+    const uint64Array = new Uint32Array(1);
+    const hashRoot = (() => {
+      const hasher = crypto.createHash('sha256');
+      hasher.update(prevHash);
+      hasher.update(':');
+      uint64Array[0] = height;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      uint64Array[0] = difficulty;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      hasher.update(version);
+      hasher.update(':');
+      uint64Array[0] = timestamp;
+      hasher.update(uint64Array);
+      hasher.update(':');
+      hasher.update(messagesJson);
+      hasher.update(':');
+      return hasher.digest();
+    })();
 
-      equals(block) {
-        return this.hash === block.hash;
-      }
+    const hasher = crypto.createHash('sha256');
+    hasher.update(hashRoot);
+    uint64Array[0] = nonce;
+    hasher.update(uint64Array);
+    return hasher.digest('hex');
+  }
 
-      getHash() {
-        const {prevHash, height, difficulty, version, timestamp, messages, nonce} = this;
-        const messagesJson = messages
-          .map(message => JSON.stringify(message))
-          .join('\n');
-
-        const uint64Array = new Uint32Array(1);
-        const hashRoot = (() => {
-          const hasher = crypto.createHash('sha256');
-          hasher.update(prevHash);
-          hasher.update(':');
-          uint64Array[0] = height;
-          hasher.update(uint64Array);
-          hasher.update(':');
-          uint64Array[0] = difficulty;
-          hasher.update(uint64Array);
-          hasher.update(':');
-          hasher.update(version);
-          hasher.update(':');
-          uint64Array[0] = timestamp;
-          hasher.update(uint64Array);
-          hasher.update(':');
-          hasher.update(messagesJson);
-          hasher.update(':');
-          return hasher.digest();
-        })();
-
-        const hasher = crypto.createHash('sha256');
-        hasher.update(hashRoot);
-        uint64Array[0] = nonce;
-        hasher.update(uint64Array);
-        return hasher.digest('hex');
-      }
-
-      verify(db, blocks, mempool = null) {
-        const _checkHash = () => this.getHash() === this.hash;
-        const _checkPrevHash = () => {
-          const prevBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
-          return this.prevHash === prevBlockHash;
-        };
-        const _checkHeight = () => {
-          const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
-          return this.height === nextBlockHeight;
-        };
-        const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
-        const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
-        const _checkSufficientDifficulty = () => this.difficulty >= (Math.max(_getNextBlockBaseDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY));
-        const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
-        const _verifyMessages = () => {
-          for (let i = 0; i < this.messages.length; i++) {
-            const message = this.messages[i];
-            const confirmingMessages = this.messages.slice();
-            confirmingMessages.splice(i, 1);
-            const error = message.verify(db, blocks, mempool, confirmingMessages);
-            if (error) {
-              return error;
-            }
-          }
-          return null;
-        };
-
-        if (!_checkHash()) {
-          return {
-            status: 400,
-            error: 'invalid hash',
-          };
-        } else if (!_checkPrevHash()) {
-          return {
-            status: 400,
-            error: 'invalid previous hash',
-          };
-        } else if (!_checkHeight()) {
-          return {
-            status: 400,
-            error: 'invalid height',
-          };
-        } else if (!_checkTimestamp()) {
-          return {
-            status: 400,
-            error: 'invalid timestamp',
-          };
-        } else if (!_checkDifficultyClaim()) {
-          return {
-            status: 400,
-            error: 'invalid difficulty claim',
-          };
-        } else if (!_checkMessagesCount()) {
-          return {
-            status: 400,
-            error: 'too many messages',
-          };
-        } else if (!_checkSufficientDifficulty()) {
-          return {
-            status: 400,
-            error: 'insufficient difficulty',
-          };
-        } else {
-          const error = _verifyMessages();
-
-          if (!error) {
-            return null;
-          } else {
-            return error;
-          }
+  verify(db, blocks, mempool = null) {
+    const _checkHash = () => this.getHash() === this.hash;
+    const _checkPrevHash = () => {
+      const prevBlockHash = (blocks.length > 0) ? blocks[blocks.length - 1].hash : zeroHash;
+      return this.prevHash === prevBlockHash;
+    };
+    const _checkHeight = () => {
+      const nextBlockHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+      return this.height === nextBlockHeight;
+    };
+    const _checkTimestamp = () => this.timestamp >= _getNextBlockMinTimestamp(blocks);
+    const _checkDifficultyClaim = () => _checkHashMeetsTarget(this.hash, _getDifficultyTarget(this.difficulty));
+    const _checkSufficientDifficulty = () => this.difficulty >= (Math.max(_getNextBlockBaseDifficulty(blocks) - _getMessagesDifficulty(this.messages), MIN_DIFFICULTY));
+    const _checkMessagesCount = () => this.messages.length <= MESSAGES_PER_BLOCK_MAX;
+    const _verifyMessages = () => {
+      for (let i = 0; i < this.messages.length; i++) {
+        const message = this.messages[i];
+        const confirmingMessages = this.messages.slice();
+        confirmingMessages.splice(i, 1);
+        const error = message.verify(db, blocks, mempool, confirmingMessages);
+        if (error) {
+          return error;
         }
       }
+      return null;
+    };
+
+    if (!_checkHash()) {
+      return {
+        status: 400,
+        error: 'invalid hash',
+      };
+    } else if (!_checkPrevHash()) {
+      return {
+        status: 400,
+        error: 'invalid previous hash',
+      };
+    } else if (!_checkHeight()) {
+      return {
+        status: 400,
+        error: 'invalid height',
+      };
+    } else if (!_checkTimestamp()) {
+      return {
+        status: 400,
+        error: 'invalid timestamp',
+      };
+    } else if (!_checkDifficultyClaim()) {
+      return {
+        status: 400,
+        error: 'invalid difficulty claim',
+      };
+    } else if (!_checkMessagesCount()) {
+      return {
+        status: 400,
+        error: 'too many messages',
+      };
+    } else if (!_checkSufficientDifficulty()) {
+      return {
+        status: 400,
+        error: 'insufficient difficulty',
+      };
+    } else {
+      const error = _verifyMessages();
+
+      if (!error) {
+        return null;
+      } else {
+        return error;
+      }
     }
-    class Message {
-      constructor(payload, hash, signature) {
-        this.payload = payload;
-        this.hash = hash;
-        this.signature = signature;
-      }
+  }
+}
 
-      static from(o) {
-        const {payload, hash, signature} = o;
-        return new Message(payload, hash, signature);
-      }
+class Message {
+  constructor(payload, hash, signature) {
+    this.payload = payload;
+    this.hash = hash;
+    this.signature = signature;
+  }
 
-      equals(message) {
-        return this.hash === message.hash;
-      }
+  static from(o) {
+    const {payload, hash, signature} = o;
+    return new Message(payload, hash, signature);
+  }
 
-      verify(db, blocks, mempool = null, confirmingMessages = []) {
-        const {payload, hash, signature} = this;
-        const payloadHash = crypto.createHash('sha256').update(payload).digest();
-        const payloadHashHex = payloadHash.toString('hex');
+  equals(message) {
+    return this.hash === message.hash;
+  }
 
-        if (payloadHashHex === hash) {
-          const payloadJson = JSON.parse(payload);
-          const {startHeight} = payloadJson;
-          const endHeight = startHeight + MESSAGE_TTL;
-          const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+  verify(db, blocks, mempool = null, confirmingMessages = []) {
+    const {payload, hash, signature} = this;
+    const payloadHash = crypto.createHash('sha256').update(payload).digest();
+    const payloadHashHex = payloadHash.toString('hex');
 
-          if (nextHeight >= startHeight && nextHeight < endHeight) {
-            if (!db.messageHashes.some(hashes => hashes.includes(hash))) {
-              const {type} = payloadJson;
+    if (payloadHashHex === hash) {
+      const payloadJson = JSON.parse(payload);
+      const {startHeight} = payloadJson;
+      const endHeight = startHeight + MESSAGE_TTL;
+      const nextHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
 
-              switch (type) {
-                case 'coinbase': {
-                  const {asset, quantity, address} = payloadJson;
-                  const publicKeyBuffer = NULL_PUBLIC_KEY;
-                  const signatureBuffer = new Buffer(signature, 'base64');
+      if (nextHeight >= startHeight && nextHeight < endHeight) {
+        if (!db.messageHashes.some(hashes => hashes.includes(hash))) {
+          const {type} = payloadJson;
 
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (asset === CRD && quantity === COINBASE_QUANTITY) {
-                      if (confirmingMessages.filter(confirmingMessage => {
-                        const payloadJson = JSON.parse(confirmingMessage.payload);
-                        const {type} = payloadJson;
-                        return type === 'coinbase';
-                      }).length === 0) {
+          switch (type) {
+            case 'coinbase': {
+              const {asset, quantity, address} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (asset === CRD && quantity === COINBASE_QUANTITY) {
+                  if (confirmingMessages.filter(confirmingMessage => {
+                    const payloadJson = JSON.parse(confirmingMessage.payload);
+                    const {type} = payloadJson;
+                    return type === 'coinbase';
+                  }).length === 0) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'multiple coinbases',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid coinbase',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+
+              break;
+            }
+            case 'send': {
+              const {asset, quantity, srcAddress, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
+                if (_isValidAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
+                    const balance = !mempool ? _getConfirmedBalance(db, srcAddress, asset) : _getUnconfirmedBalance(db, mempool, srcAddress, asset);
+
+                    if (balance >= quantity) {
+                      return null;
+                    } else {
+                      return {
+                        status: 402,
+                        error: 'insufficient funds',
+                      };
+                    }
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'minter': {
+              const {asset, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBaseAsset(asset)) {
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+
+                  if (minter === undefined) {
+                    return null;
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'asset already has minter',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    stack: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'mint': {
+              const {asset, quantity, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBasicAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const address = _getAddressFromPublicKey(publicKeyBuffer);
+                    const baseAsset = _getBaseAsset(asset);
+                    const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
+
+                    if (minter === address) {
+                      return null;
+                    } else {
+                      const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
+
+                      if (price > 0) {
                         return null;
                       } else {
                         return {
                           status: 400,
-                          error: 'multiple coinbases',
+                          stack: 'address cannot mint this asset',
                         };
                       }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid coinbase',
-                      };
                     }
                   } else {
                     return {
                       status: 400,
-                      error: 'invalid signature',
+                      error: 'invalid quantity',
                     };
                   }
-
-                  break;
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
                 }
-                case 'send': {
-                  const {asset, quantity, srcAddress, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'get': {
+              const {address, asset, quantity} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const signatureBuffer = new Buffer(signature, 'base64');
 
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
-                    if (_isValidAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
-                        const balance = !mempool ? _getConfirmedBalance(db, srcAddress, asset) : _getUnconfirmedBalance(db, mempool, srcAddress, asset);
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBasicAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const baseAsset = _getBaseAsset(asset);
+                    const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
 
-                        if (balance >= quantity) {
-                          return null;
-                        } else {
-                          return {
-                            status: 402,
-                            error: 'insufficient funds',
-                          };
-                        }
-                      } else {
-                        return {
-                          status: 400,
-                          error: 'invalid quantity',
-                        };
-                      }
+                    if (minter === undefined || minter === address) {
+                      return null;
                     } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                case 'minter': {
-                  const {asset, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
+                      const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
 
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBaseAsset(asset)) {
-                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
-
-                      if (minter === undefined) {
+                      if (price === 0) {
                         return null;
                       } else {
                         return {
                           status: 400,
-                          stack: 'asset already has minter',
+                          stack: 'address cannot mint this asset',
                         };
                       }
-                    } else {
-                      return {
-                        status: 400,
-                        stack: 'invalid asset',
-                      };
                     }
                   } else {
                     return {
                       status: 400,
-                      error: 'invalid signature',
+                      error: 'invalid quantity',
                     };
                   }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
                 }
-                case 'mint': {
-                  const {asset, quantity, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'burn': {
+              const {asset, quantity, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
 
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBasicAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity) {
-                        const address = _getAddressFromPublicKey(publicKeyBuffer);
-                        const baseAsset = _getBaseAsset(asset);
-                        const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBasicAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    const address = _getAddressFromPublicKey(publicKeyBuffer);
 
-                        if (minter === address) {
-                          return null;
-                        } else {
-                          const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
-
-                          if (price > 0) {
-                            return null;
-                          } else {
-                            return {
-                              status: 400,
-                              stack: 'address cannot mint this asset',
-                            };
-                          }
-                        }
+                    const _checkFree = () => {
+                      const baseAsset = _getBaseAsset(asset);
+                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
+                      if (minter === undefined || minter === address) {
+                        return null;
                       } else {
-                        return {
-                          status: 400,
-                          error: 'invalid quantity',
-                        };
-                      }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                case 'get': {
-                  const {address, asset, quantity} = payloadJson;
-                  const publicKeyBuffer = NULL_PUBLIC_KEY;
-                  const signatureBuffer = new Buffer(signature, 'base64');
+                        const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
 
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBasicAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity) {
-                        const baseAsset = _getBaseAsset(asset);
-                        const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
-
-                        if (minter === undefined || minter === address) {
-                          return null;
-                        } else {
-                          const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
-
-                          if (price === 0) {
-                            return null;
-                          } else {
-                            return {
-                              status: 400,
-                              stack: 'address cannot mint this asset',
-                            };
-                          }
-                        }
-                      } else {
-                        return {
-                          status: 400,
-                          error: 'invalid quantity',
-                        };
-                      }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                case 'burn': {
-                  const {asset, quantity, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
-
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBasicAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity) {
-                        const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-                        const _checkFree = () => {
-                          const baseAsset = _getBaseAsset(asset);
-                          const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
-                          if (minter === undefined || minter === address) {
-                            return null;
-                          } else {
-                            const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
-
-                            if (price === 0) {
-                              return null;
-                            } else {
-                              return {
-                                status: 400,
-                                stack: 'address cannot burn this asset',
-                              };
-                            }
-                          }
-                        };
-                        const _checkBalance = () => {
-                          const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
-
-                          if (balance >= quantity) {
-                            return null;
-                          } else {
-                            return {
-                              status: 402,
-                              error: 'insufficient funds',
-                            };
-                          }
-                        };
-
-                        return _checkFree() || _checkBalance();
-                      } else {
-                        return {
-                          status: 400,
-                          error: 'invalid quantity',
-                        };
-                      }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                case 'drop': {
-                  const {address, asset, quantity} = payloadJson;
-                  const publicKeyBuffer = NULL_PUBLIC_KEY;
-                  const signatureBuffer = new Buffer(signature, 'base64');
-
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBasicAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity) {
-
-                        const _checkFree = () => {
-                          const baseAsset = _getBaseAsset(asset);
-                          const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
-                          if (minter === undefined || minter === address) {
-                            return null;
-                          } else {
-                            const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
-
-                            if (price === 0) {
-                              return null;
-                            } else {
-                              return {
-                                status: 400,
-                                stack: 'address cannot drop this asset',
-                              };
-                            }
-                          }
-                        };
-                        const _checkBalance = () => {
-                          const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
-
-                          if (balance >= quantity) {
-                            return null;
-                          } else {
-                            return {
-                              status: 402,
-                              error: 'insufficient funds',
-                            };
-                          }
-                        };
-
-                        return _checkFree() || _checkBalance();
-                      } else {
-                        return {
-                          status: 400,
-                          error: 'invalid quantity',
-                        };
-                      }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                case 'price': {
-                  const {asset, price, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
-
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBaseAsset(asset)) {
-                      const address = _getAddressFromPublicKey(publicKeyBuffer);
-                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
-
-                      if (minter === address) {
-                        if (isFinite(price) && price >= 0 && Math.floor(price) === price) {
+                        if (price === 0) {
                           return null;
                         } else {
                           return {
                             status: 400,
-                            stack: 'invalid price',
+                            stack: 'address cannot burn this asset',
+                          };
+                        }
+                      }
+                    };
+                    const _checkBalance = () => {
+                      const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
+
+                      if (balance >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 402,
+                          error: 'insufficient funds',
+                        };
+                      }
+                    };
+
+                    return _checkFree() || _checkBalance();
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'drop': {
+              const {address, asset, quantity} = payloadJson;
+              const publicKeyBuffer = NULL_PUBLIC_KEY;
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBasicAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+
+                    const _checkFree = () => {
+                      const baseAsset = _getBaseAsset(asset);
+                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, baseAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, baseAsset);
+                      if (minter === undefined || minter === address) {
+                        return null;
+                      } else {
+                        const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
+
+                        if (price === 0) {
+                          return null;
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'address cannot drop this asset',
+                          };
+                        }
+                      }
+                    };
+                    const _checkBalance = () => {
+                      const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
+
+                      if (balance >= quantity) {
+                        return null;
+                      } else {
+                        return {
+                          status: 402,
+                          error: 'insufficient funds',
+                        };
+                      }
+                    };
+
+                    return _checkFree() || _checkBalance();
+                  } else {
+                    return {
+                      status: 400,
+                      error: 'invalid quantity',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'price': {
+              const {asset, price, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBaseAsset(asset)) {
+                  const address = _getAddressFromPublicKey(publicKeyBuffer);
+                  const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+
+                  if (minter === address) {
+                    if (isFinite(price) && price >= 0 && Math.floor(price) === price) {
+                      return null;
+                    } else {
+                      return {
+                        status: 400,
+                        stack: 'invalid price',
+                      };
+                    }
+                  } else {
+                    return {
+                      status: 400,
+                      stack: 'address is not minter of this asset',
+                    };
+                  }
+                } else {
+                  return {
+                    status: 400,
+                    error: 'invalid asset',
+                  };
+                }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
+              }
+            }
+            case 'buy': {
+              const {asset, quantity, price, publicKey} = payloadJson;
+              const publicKeyBuffer = new Buffer(publicKey, 'base64');
+              const signatureBuffer = new Buffer(signature, 'base64');
+
+              if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
+                if (_isBaseAsset(asset)) {
+                  if (quantity > 0 && Math.floor(quantity) === quantity) {
+                    if (isFinite(price) && price > 0 && Math.floor(price) === price) {
+                      const address = _getAddressFromPublicKey(publicKeyBuffer);
+                      const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
+
+                      if (minter) {
+                        const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
+
+                        if (prices.includes(price)) {
+                          const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, mempool, address, CRD);
+
+                          if (balance >= (quantity * price)) {
+                            return null;
+                          } else {
+                            return {
+                              status: 400,
+                              stack: 'insufficient funds',
+                            };
+                          }
+                        } else {
+                          return {
+                            status: 400,
+                            stack: 'incorrect declared price',
                           };
                         }
                       } else {
@@ -578,353 +613,336 @@ class Crds {
                     } else {
                       return {
                         status: 400,
-                        error: 'invalid asset',
+                        stack: 'invalid price',
                       };
                     }
                   } else {
                     return {
                       status: 400,
-                      error: 'invalid signature',
+                      stack: 'invalid quantity',
                     };
                   }
-                }
-                case 'buy': {
-                  const {asset, quantity, price, publicKey} = payloadJson;
-                  const publicKeyBuffer = new Buffer(publicKey, 'base64');
-                  const signatureBuffer = new Buffer(signature, 'base64');
-
-                  if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer)) {
-                    if (_isBaseAsset(asset)) {
-                      if (quantity > 0 && Math.floor(quantity) === quantity) {
-                        if (isFinite(price) && price > 0 && Math.floor(price) === price) {
-                          const address = _getAddressFromPublicKey(publicKeyBuffer);
-                          const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
-
-                          if (minter) {
-                            const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
-
-                            if (prices.includes(price)) {
-                              const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, mempool, address, CRD);
-
-                              if (balance >= (quantity * price)) {
-                                return null;
-                              } else {
-                                return {
-                                  status: 400,
-                                  stack: 'insufficient funds',
-                                };
-                              }
-                            } else {
-                              return {
-                                status: 400,
-                                stack: 'incorrect declared price',
-                              };
-                            }
-                          } else {
-                            return {
-                              status: 400,
-                              stack: 'address is not minter of this asset',
-                            };
-                          }
-                        } else {
-                          return {
-                            status: 400,
-                            stack: 'invalid price',
-                          };
-                        }
-                      } else {
-                        return {
-                          status: 400,
-                          stack: 'invalid quantity',
-                        };
-                      }
-                    } else {
-                      return {
-                        status: 400,
-                        error: 'invalid asset',
-                      };
-                    }
-                  } else {
-                    return {
-                      status: 400,
-                      error: 'invalid signature',
-                    };
-                  }
-                }
-                default: {
+                } else {
                   return {
                     status: 400,
-                    error: 'unknown message type',
+                    error: 'invalid asset',
                   };
                 }
+              } else {
+                return {
+                  status: 400,
+                  error: 'invalid signature',
+                };
               }
-            } else {
+            }
+            default: {
               return {
                 status: 400,
-                error: 'replay detected',
-                soft: true,
+                error: 'unknown message type',
               };
             }
-          } else {
-            return {
-              status: 400,
-              error: 'ttl expired',
-            };
           }
         } else {
           return {
             status: 400,
-            error: 'invalid hash',
+            error: 'replay detected',
+            soft: true,
           };
         }
+      } else {
+        return {
+          status: 400,
+          error: 'ttl expired',
+        };
       }
+    } else {
+      return {
+        status: 400,
+        error: 'invalid hash',
+      };
     }
-    class Peer {
-      constructor(url) {
-        this.url = url;
+  }
+}
+class Peer {
+  constructor(url) {
+    this.url = url;
 
-        this._connection = null;
-        this._enabled = null;
-        this._reconnectTimeout = null;
-        this._redownloadInterval = null;
-      }
+    this._connection = null;
+    this._enabled = null;
+    this._reconnectTimeout = null;
+    this._redownloadInterval = null;
+  }
 
-      equals(peer) {
-        return this.url === peer.url;
-      }
+  equals(peer) {
+    return this.url === peer.url;
+  }
 
-      isEnabled() {
-        return this._enabled;
-      }
+  isEnabled() {
+    return this._enabled;
+  }
 
-      enable() {
-        this._enabled = true;
+  enable() {
+    this._enabled = true;
 
-        const _listen = () => {
-          const _recurse = () => {
-            const c = new ws(this.url.replace(/^http/, 'ws') + '/listen');
-            c.on('open', () => {
-              c.on('message', s => {
-                const m = JSON.parse(s);
-                const {type} = m;
+    const _listen = () => {
+      const _recurse = () => {
+        const c = new ws(this.url.replace(/^http/, 'ws') + '/listen');
+        c.on('open', () => {
+          c.on('message', s => {
+            const m = JSON.parse(s);
+            const {type} = m;
 
-                switch (type) {
-                  case 'block': {
-                    const {block: blockJson} = m;
-                    const block = Block.from(blockJson);
-                    const error = _addBlock(dbs, blocks, mempool, block);
-                    if (error && !error.soft) {
-                      console.warn('add remote block error:', error);
-                    }
-                    break;
-                  }
-                  case 'message': {
-                    const {message: messgeJson} = m;
-                    const message = Message.from(messgeJson);
-                    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-                    const error = _addMessage(db, blocks, mempool, message);
-                    if (error && !error.soft) {
-                      console.warn('add remote message error:', error);
-                    }
-                    break;
-                  }
-                  case 'peer': {
-                    const {peer} = m;
-                    _addPeer(peer);
-                    break;
-                  }
-                  default: {
-                    console.warn('unknown message type:', msg);
-                    break;
-                  }
+            switch (type) {
+              case 'block': {
+                const {block: blockJson} = m;
+                const block = Block.from(blockJson);
+                const error = _addBlock(this.dbs, this.blocks, this.mempool, block);
+                if (error && !error.soft) {
+                  console.warn('add remote block error:', error);
                 }
-              });
-              c.on('close', () => {
-                this._connection = null;
-
-                if (this._enabled) {
-                  _retry();
+                break;
+              }
+              case 'message': {
+                const {message: messgeJson} = m;
+                const message = Message.from(messgeJson);
+                const error = this.submitMessage(message);
+                if (error && !error.soft) {
+                  console.warn('add remote message error:', error);
                 }
-              });
-            });
-            c.on('error', err => {
-              // console.warn(err);
+                break;
+              }
+              case 'peer': {
+                const {peer} = m;
+                _addPeer(peer);
+                break;
+              }
+              default: {
+                console.warn('unknown message type:', msg);
+                break;
+              }
+            }
+          });
+          c.on('close', () => {
+            this._connection = null;
 
-              this._connection = null;
+            if (this._enabled) {
+              _retry();
+            }
+          });
+        });
+        c.on('error', err => {
+          // console.warn(err);
 
-              if (this._enabled) {
-                _retry();
+          this._connection = null;
+
+          if (this._enabled) {
+            _retry();
+          }
+        });
+
+        this._connection = c;
+      };
+      const _retry = () => {
+        this._reconnectTimeout = setTimeout(() => {
+          this._reconnectTimeout = null;
+
+          _recurse();
+        }, 1000);
+      };
+
+      _recurse();
+    };
+    const _download = () => {
+      const _recurse = () => {
+        const _requestBlocks = ({startHeight}) => new Promise((accept, reject) => {
+          const result = [];
+
+          const _recurse = height => {
+            request(this.url + '/blocks/' + height, {
+              json: true,
+            }, (err, res, body) => {
+              if (!err) {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  const block = body;
+                  result.push(block);
+
+                  _recurse(height + 1);
+                } else if (res.statusCode === 404) {
+                  accept(result);
+                } else {
+                  reject({
+                    status: res.statusCode,
+                    error: 'invalid status code',
+                  });
+                }
+              } else {
+                reject(err);
               }
             });
-
-            this._connection = c;
           };
-          const _retry = () => {
-            this._reconnectTimeout = setTimeout(() => {
-              this._reconnectTimeout = null;
+          _recurse(startHeight);
+        });
+        const _requestMempool = () => new Promise((accept, reject) => {
+          request(this.url + '/mempool', {
+            json: true,
+          }, (err, res, body) => {
+            if (!err) {
+              const mempool = body;
+              accept(mempool);
+            } else {
+              reject(err);
+            }
+          });
+        });
+        const _requestPeers = () => new Promise((accept, reject) => {
+          request(this.url + '/peers', {
+            json: true,
+          }, (err, res, body) => {
+            if (!err) {
+              const peers = body;
+              accept(peers);
+            } else {
+              reject(err);
+            }
+          });
+        });
 
-              _recurse();
-            }, 1000);
-          };
-
-          _recurse();
-        };
-        const _download = () => {
-          const _recurse = () => {
-            const _requestBlocks = ({startHeight}) => new Promise((accept, reject) => {
-              const result = [];
-
-              const _recurse = height => {
-                request(this.url + '/blocks/' + height, {
-                  json: true,
-                }, (err, res, body) => {
-                  if (!err) {
-                    if (res.statusCode >= 200 && res.statusCode < 300) {
-                      const block = body;
-                      result.push(block);
-
-                      _recurse(height + 1);
-                    } else if (res.statusCode === 404) {
-                      accept(result);
-                    } else {
-                      reject({
-                        status: res.statusCode,
-                        error: 'invalid status code',
-                      });
-                    }
-                  } else {
-                    reject(err);
-                  }
-                });
-              };
-              _recurse(startHeight);
-            });
-            const _requestMempool = () => new Promise((accept, reject) => {
-              request(this.url + '/mempool', {
-                json: true,
-              }, (err, res, body) => {
-                if (!err) {
-                  const mempool = body;
-                  accept(mempool);
-                } else {
-                  reject(err);
+        const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
+        Promise.all([
+          _requestBlocks({
+            startHeight: Math.max(topBlockHeight - CHARGE_SETTLE_BLOCKS, 1),
+          }),
+          _requestMempool(),
+          _requestPeers(),
+        ])
+          .then(([
+            remoteBlocks,
+            remoteMempool,
+            remotePeers,
+          ]) => {
+            const _addBlocks = () => {
+              for (let i = 0; i < remoteBlocks.length; i++) {
+                const remoteBlock = Block.from(remoteBlocks[i]);
+                const error = _addBlock(this.dbs, this.blocks, this.mempool, remoteBlock);
+                if (error && !error.soft) {
+                  console.warn('add remote block error:', error);
                 }
-              });
-            });
-            const _requestPeers = () => new Promise((accept, reject) => {
-              request(this.url + '/peers', {
-                json: true,
-              }, (err, res, body) => {
-                if (!err) {
-                  const peers = body;
-                  accept(peers);
-                } else {
-                  reject(err);
+              }
+            };
+            const _addMempool = () => {
+              const {blocks: remoteBlocks, messages: remoteMessages} = remoteMempool;
+
+              for (let i = 0; i < remoteBlocks.length; i++) {
+                const remoteBlock = Block.from(remoteBlocks[i]);
+                const error = _addBlock(this.dbs, this.blocks, this.mempool, remoteBlock);
+                if (error && !error.soft) {
+                  console.warn('add remote block error:', error);
                 }
-              });
-            });
+              }
+              for (let i = 0; i < remoteMessages.length; i++) {
+                const remoteMessage = Message.from(remoteMessages[i]);
+                const error = this.submitMessage(remoteMessage);
+                if (error && !error.soft) {
+                  console.warn('add remote message error:', error);
+                }
+              }
+            };
+            const _addPeers = () => {
+              for (let i = 0; i < remotePeers.length; i++) {
+                const url = remotePeers[i];
+                _addPeer(url);
+              }
+            };
 
-            const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
-            Promise.all([
-              _requestBlocks({
-                startHeight: Math.max(topBlockHeight - CHARGE_SETTLE_BLOCKS, 1),
-              }),
-              _requestMempool(),
-              _requestPeers(),
-            ])
-              .then(([
-                remoteBlocks,
-                remoteMempool,
-                remotePeers,
-              ]) => {
-                const _addBlocks = () => {
-                  for (let i = 0; i < remoteBlocks.length; i++) {
-                    const remoteBlock = Block.from(remoteBlocks[i]);
-                    const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-                    if (error && !error.soft) {
-                      console.warn('add remote block error:', error);
-                    }
-                  }
-                };
-                const _addMempool = () => {
-                  const {blocks: remoteBlocks, messages: remoteMessages} = remoteMempool;
+            _addBlocks();
+            _addMempool();
+            _addPeers();
+          })
+          .catch(err => {
+            // console.warn(err);
+          });
+      };
 
-                  for (let i = 0; i < remoteBlocks.length; i++) {
-                    const remoteBlock = Block.from(remoteBlocks[i]);
-                    const error = _addBlock(dbs, blocks, mempool, remoteBlock);
-                    if (error && !error.soft) {
-                      console.warn('add remote block error:', error);
-                    }
-                  }
-                  for (let i = 0; i < remoteMessages.length; i++) {
-                    const remoteMessage = Message.from(remoteMessages[i]);
-                    const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-                    const error = _addMessage(db, blocks, mempool, remoteMessage);
-                    if (error && !error.soft) {
-                      console.warn('add remote message error:', error);
-                    }
-                  }
-                };
-                const _addPeers = () => {
-                  for (let i = 0; i < remotePeers.length; i++) {
-                    const url = remotePeers[i];
-                    _addPeer(url);
-                  }
-                };
+      this._redownloadInterval = setInterval(() => {
+        _recurse();
+      }, 30 * 1000);
 
-                _addBlocks();
-                _addMempool();
-                _addPeers();
-              })
-              .catch(err => {
-                // console.warn(err);
-              });
-          };
+      _recurse();
+    };
 
-          this._redownloadInterval = setInterval(() => {
-            _recurse();
-          }, 30 * 1000);
+    _listen();
+    _download();
+  }
 
-          _recurse();
-        };
+  disable() {
+    this._enabled = false;
 
-        _listen();
-        _download();
-      }
-
-      disable() {
-        this._enabled = false;
-
-        if (this._connection) {
-          this._connection.close();
-        }
-        if (this._reconnectTimeout) {
-          clearTimeout(this._reconnectTimeout);
-
-          this._reconnectTimeout = null;
-        }
-        if (this._redownloadInterval) {
-          clearInterval(this._redownloadInterval);
-
-          this._redownloadInterval = null;
-        }
-      }
+    if (this._connection) {
+      this._connection.close();
     }
+    if (this._reconnectTimeout) {
+      clearTimeout(this._reconnectTimeout);
 
-    const _clone = o => JSON.parse(JSON.stringify(o));
-    const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
-    const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(eccrypto.getPublic(privateKey));
-    const _isValidAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?(?::mint)?$/.test(asset);
-    const _isBasicAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?$/.test(asset);
-    const _isBaseAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+$/.test(asset);
-    const _getBaseAsset = asset => asset.match(/^((?:[A-Z0-9]|(?!^)\-(?!$))+)/)[1];
-    const _isMintAsset = asset => /:mint$/.test(asset);
+      this._reconnectTimeout = null;
+    }
+    if (this._redownloadInterval) {
+      clearInterval(this._redownloadInterval);
 
-    let dbs = [];
-    let blocks = [];
-    let mempool = _clone(DEFAULT_MEMPOOL);
-    let peers = [];
-    const api = new EventEmitter();
+      this._redownloadInterval = null;
+    }
+  }
+}
+
+class Crds {
+  constructor({
+    dataDirectory = DEFAULTS.dataDirectory,
+    cli = DEFAULTS.cli,
+  } = {}) {
+    this.dataDirectory = dataDirectory;
+    this.cli = cli;
+
+    this.dbs = [];
+    this.blocks = [];
+    this.mempool = _clone(DEFAULT_MEMPOOL);
+    this.peers = [];
+    this.api = new EventEmitter();
+  }
+
+  submitMessage(message) {
+    const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+    return this.addMessage(db, this.blocks, this.mempool, message);
+  }
+
+  addMessage(db, blocks, mempool, message) {
+    if (mempool.messages.length < MESSAGES_PER_BLOCK_MAX) {
+      if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
+        const error = message.verify(db, blocks, mempool);
+
+        if (!error) {
+          mempool.messages.push(message);
+
+          this.api.emit('message', message);
+        }
+        return error;
+      } else {
+        return null;
+      }
+    } else {
+      return {
+        status: 503,
+        error: 'mempool full',
+      };
+    }
+  }
+
+  listen({
+    host = DEFAULTS.host,
+    port = DEFAULTS.port,
+  } = {}) {
+    const {dataDirectory, cli} = this;
+
+    const localUrl = `http://${host}:${port}`;
+
     let live = true;
 
     const maxTarget = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
@@ -939,486 +957,6 @@ class Crds {
     const zeroHash = bigint(0).toString(16);
     const connectionsSymbol = Symbol();
 
-    const _getAllConfirmedBalances = db => _clone(db.balances);
-    const _getConfirmedBalances = (db, address) => _clone(db.balances[address] || {});
-    const _getConfirmedBalance = (db, address, asset) => {
-      let balance = (db.balances[address] || {})[asset];
-      if (balance === undefined) {
-        balance = 0;
-      }
-      return balance;
-    };
-    const _getAllUnconfirmedBalances = (db, mempool) => {
-      const result = _getAllConfirmedBalances(db);
-
-      for (let i = 0; i < mempool.messages.length; i++) {
-        const message = mempool.messages[i];
-        const payloadJson = JSON.parse(message.payload);
-        const {type} = payloadJson;
-
-        if (type === 'coinbase') {
-          const {asset, quantity, address} = payloadJson;
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let assetEntry = addressEntry[asset];
-          if (assetEntry === undefined) {
-            assetEntry = 0;
-          }
-          addressEntry[asset] = assetEntry + quantity;
-        } else if (type === 'send') {
-          const {asset, quantity, srcAddress, dstAddress} = payloadJson;
-
-          let srcAddressEntry = result[srcAddress];
-          if (srcAddressEntry === undefined){
-            srcAddressEntry = {};
-            result[srcAddress] = srcAddressEntry;
-          }
-          let srcAssetEntry = srcAddressEntry[asset];
-          if (srcAssetEntry === undefined) {
-            srcAssetEntry = 0;
-          }
-          srcAddressEntry[asset] = srcAssetEntry - quantity;
-
-          let dstAddressEntry = result[dstAddress];
-          if (dstAddressEntry === undefined){
-            dstAddressEntry = {};
-            result[dstAddress] = dstAddressEntry;
-          }
-          let dstAssetEntry = dstAddressEntry[asset];
-          if (dstAssetEntry === undefined) {
-            dstAssetEntry = 0;
-          }
-          dstAddressEntry[asset] = dstAssetEntry + quantity;
-        } else if (type === 'buy') {
-          const {asset, quantity, price, publicKey} = payloadJson;
-          const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          let srcAddressEntry = result[srcAddress];
-          if (srcAddressEntry === undefined){
-            srcAddressEntry = {};
-            result[srcAddress] = srcAddressEntry;
-          }
-          let srcAddressDstAssetEntry = srcAddressEntry[CRD];
-          if (srcAddressDstAssetEntry === undefined) {
-            srcAddressDstAssetEntry = 0;
-          }
-          srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
-          srcAddressEntry[CRD] = srcAddressDstAssetEntry;
-
-          let dstAddressEntry = result[dstAddress];
-          if (dstAddressEntry === undefined){
-            dstAddressEntry = {};
-            result[dstAddress] = dstAddressEntry;
-          }
-          let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
-          if (dstAddressSrcAssetEntry === undefined) {
-            dstAddressSrcAssetEntry = 0;
-          }
-          dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
-          dstAddressEntry[CRD] = dstAddressSrcAssetEntry;
-
-          let dstAddressDstAssetEntry = dstAddressEntry[asset];
-          if (dstAddressDstAssetEntry === undefined) {
-            dstAddressDstAssetEntry = 0;
-          }
-          dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
-          dstAddressEntry[asset] = dstAddressDstAssetEntry;
-        } else if (type === 'mint') {
-          const {asset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let assetEntry = addressEntry[asset];
-          if (assetEntry === undefined) {
-            assetEntry = 0;
-          }
-          assetEntry = assetEntry + quantity;
-          addressEntry[asset] = assetEntry;
-        } else if (type === 'get') {
-          const {address, asset, quantity} = payloadJson;
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let assetEntry = addressEntry[asset];
-          if (assetEntry === undefined) {
-            assetEntry = 0;
-          }
-          assetEntry = assetEntry + quantity;
-          addressEntry[asset] = assetEntry;
-        } else if (type === 'burn') {
-          const {asset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let assetEntry = addressEntry[asset];
-          assetEntry = assetEntry - quantity;
-          if (assetEntry > 0) {
-            addressEntry[asset] = assetEntry;
-          } else {
-            delete addressEntry[asset];
-
-            if (Object.keys(addressEntry).length === 0) {
-              delete result[address];
-            }
-          }
-        } else if (type === 'drop') {
-          const {address, asset, quantity} = payloadJson;
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let assetEntry = addressEntry[asset];
-          assetEntry = assetEntry - quantity;
-          if (assetEntry > 0) {
-            addressEntry[asset] = assetEntry;
-          } else {
-            delete addressEntry[asset];
-
-            if (Object.keys(addressEntry).length === 0) {
-              delete result[address];
-            }
-          }
-        } else if (type === 'minter') {
-          const {asset, publicKey} = payloadJson;
-          const mintAsset = asset + ':mint';
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-          let addressEntry = result[address];
-          if (addressEntry === undefined){
-            addressEntry = {};
-            result[address] = addressEntry;
-          }
-          let mintAssetEntry = addressEntry[mintAsset];
-          if (mintAssetEntry === undefined) {
-            mintAssetEntry = 0;
-          }
-          mintAssetEntry = mintAssetEntry + 1;
-          addressEntry[mintAsset] = mintAssetEntry;
-        }
-      }
-
-      return result;
-    };
-    const _getUnconfirmedBalances = (db, mempool, address) => {
-      let result = _getConfirmedBalances(db, address);
-
-      for (let i = 0; i < mempool.messages.length; i++) {
-        const message = mempool.messages[i];
-        const payloadJson = JSON.parse(message.payload);
-        const {type} = payloadJson;
-
-        if (type === 'coinbase') {
-          const {asset, quantity, address: localAddress} = payloadJson;
-
-          if (localAddress === address) {
-            let assetEntry = result[asset];
-            if (assetEntry === undefined) {
-              assetEntry = 0;
-            }
-            result[asset] = assetEntry + quantity;
-          }
-        } else if (type === 'send') {
-          const {asset, quantity, srcAddress, dstAddress} = payloadJson;
-
-          if (srcAddress === address) {
-            let srcAssetEntry = result[asset];
-            if (srcAssetEntry === undefined) {
-              srcAssetEntry = 0;
-            }
-            result[asset] = srcAssetEntry - quantity;
-          }
-
-          if (dstAddress === address) {
-            let dstAssetEntry = result[asset];
-            if (dstAssetEntry === undefined) {
-              dstAssetEntry = 0;
-            }
-            result[asset] = dstAssetEntry + quantity;
-          }
-        } else if (type === 'buy') {
-          const {asset, quantity, price, publicKey} = payloadJson;
-          const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (srcAddress === address) {
-            let assetEntry = result[CRD];
-            if (assetEntry === undefined) {
-              assetEntry = 0;
-            }
-            result[CRD] = assetEntry + (price * quantity);
-          }
-
-          if (dstAddress === address) {
-            let crdEntry = result[CRD];
-            if (crdEntry === undefined) {
-              crdEntry = 0;
-            }
-            result[CRD] = crdEntry - (price * quantity);
-
-            let assetEntry = result[asset];
-            if (assetEntry === undefined) {
-              assetEntry = 0;
-            }
-            result[asset] = assetEntry + quantity;
-          }
-        } else if (type === 'mint') {
-          const {asset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address) {
-            let assetEntry = result[asset];
-            if (assetEntry === undefined) {
-              assetEntry = 0;
-            }
-            assetEntry = assetEntry + quantity;
-            result[asset] = assetEntry;
-          }
-        } else if (type === 'get') {
-          const {address: localAddress, asset, quantity} = payloadJson;
-
-          if (localAddress === address) {
-            let assetEntry = result[asset];
-            if (assetEntry === undefined) {
-              assetEntry = 0;
-            }
-            assetEntry = assetEntry + quantity;
-            result[asset] = assetEntry;
-          }
-        } else if (type === 'burn') {
-          const {asset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address) {
-            let assetEntry = result[asset];
-            assetEntry = assetEntry - quantity;
-            if (assetEntry > 0) {
-              result[asset] = assetEntry;
-            } else {
-              delete result[asset];
-            }
-          }
-        } else if (type === 'drop') {
-          const {address: localAddress, asset, quantity} = payloadJson;
-
-          if (localAddress === address) {
-            let assetEntry = result[asset];
-            assetEntry = assetEntry - quantity;
-            if (assetEntry > 0) {
-              result[asset] = assetEntry;
-            } else {
-              delete result[asset];
-            }
-          }
-        } else if (type === 'minter') {
-          const {asset, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address) {
-            const mintAsset = asset + ':mint';
-
-            let mintAssetEntry = result[mintAsset];
-            if (mintAssetEntry === undefined) {
-              mintAssetEntry = 0;
-            }
-            mintAssetEntry = mintAssetEntry + 1;
-            result[mintAsset] = mintAssetEntry;
-          }
-        }
-      }
-
-      return result;
-    };
-    const _getUnconfirmedBalance = (db, mempool, address, asset) => {
-      let result = _getConfirmedBalance(db, address, asset);
-
-      for (let i = 0; i < mempool.messages.length; i++) {
-        const message = mempool.messages[i];
-        const payloadJson = JSON.parse(message.payload);
-        const {type} = payloadJson;
-
-        if (type === 'coinbase') {
-          const {asset: localAsset, quantity, address: localAddress} = payloadJson;
-
-          if (localAsset === asset && localAddress === address) {
-            result = result + quantity;
-          }
-        } else if (type === 'send') {
-          const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
-
-          if (a === asset) {
-            if (srcAddress === address) {
-              result = result - quantity;
-            }
-            if (dstAddress === address) {
-              result = result + quantity;
-            }
-          }
-        } else if (type === 'buy') {
-          const {address: localAddress, asset: localAsset} = payloadJson;
-
-          if (asset === CRD) {
-            const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
-
-            if (address === minter) {
-              const {quantity, price} = payloadJson;
-              result = result + (price * quantity);
-            }
-            if (address === localAddress) {
-              result = result - (price * quantity);
-            }
-          } else {
-            if (address === localAddress && asset === localAsset) {
-              const {quantity, price} = payloadJson;
-              result = result + quantity;
-            }
-          }
-        } else if (type === 'mint') {
-          const {asset: localAsset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address && localAsset === asset) {
-            result = result + quantity;
-          }
-        } else if (type === 'get') {
-          const {address: localAddress, asset: localAsset, quantity} = payloadJson;
-
-          if (localAddress === address && localAsset === asset) {
-            result = result + quantity;
-          }
-        } else if (type === 'burn') {
-          const {asset: localAsset, quantity, publicKey} = payloadJson;
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address && localAsset === asset) {
-            result = result - quantity;
-          }
-        } else if (type === 'drop') {
-          const {address: localAddress, asset: localAsset, quantity} = payloadJson;
-
-          if (localAddress === address && localAsset === asset) {
-            result = result - quantity;
-          }
-        } else if (type === 'minter') {
-          const {asset: localAsset, publicKey} = payloadJson;
-          const mintAsset = localAsset + ':mint';
-          const publicKeyBuffer = new Buffer(publicKey, 'base64');
-          const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
-
-          if (localAddress === address && mintAsset === asset) {
-            result = result + 1;
-          }
-        }
-      }
-
-      return result;
-    };
-    const _getConfirmedMinter = (db, confirmingMessages, asset) => {
-      let minter = db.minters[asset];
-      minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
-      return minter;
-    };
-    const _getUnconfirmedMinter = (db, mempool, confirmingMessages, asset) => {
-      let minter = _getConfirmedMinter(db, confirmingMessages, asset);
-      minter = _getPostMessagesMinter(minter, asset, mempool.messages);
-      return minter;
-    };
-    const _getPostMessagesMinter = (minter, asset, messages) => {
-      const mintMessages = messages.filter(message => {
-        const payloadJson = JSON.parse(message.payload);
-        return (payloadJson.type === 'minter' && payloadJson.asset === asset) ||
-          (payloadJson.type === 'send' && payloadJson.asset === (asset + ':mint'));
-      });
-
-      let done = false;
-      while (mintMessages.length > 0 && !done) {
-        done = true;
-
-        for (let i = 0; i < mintMessages.length; i++) {
-          const message = mintMessages[i];
-          const payloadJson = JSON.parse(message.payload);
-          const {type} = payloadJson;
-
-          if (type === 'minter') {
-            if (minter === undefined) {
-              const {publicKey} = payloadJson;
-              const publicKeyBuffer = new Buffer(publicKey, 'base64');
-              const address = _getAddressFromPublicKey(publicKeyBuffer);
-
-              minter = address;
-              done = false;
-              mintMessages.splice(i, 1);
-              break;
-            }
-          } else if (type === 'send') {
-            const {srcAddress} = payloadJson;
-
-            if (minter === srcAddress) {
-              const {dstAddress} = payloadJson;
-
-              minter = dstAddress;
-              mintMessages.splice(i, 1);
-              done = false;
-              break;
-            }
-          }
-        }
-      }
-
-      return minter;
-    };
-    const _getConfirmedPrice = (db, confirmingMessages, asset) => {
-      const prices = _getConfirmedPrices(db, confirmingMessages, asset);
-      return prices[prices.length - 1];
-    };
-    const _getUnconfirmedPrice = (db, mempool, confirmingMessages, asset) => {
-      const prices = _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
-      return prices[prices.length - 1];
-    };
-    const _getConfirmedPrices = (db, confirmingMessages, asset) => {
-      let prices = [typeof db.prices[asset] === 'number' ? db.prices[asset] : Infinity];
-      prices = _getPostMessagesPrices(prices, asset, confirmingMessages);
-      return prices.map(price => price !== null ? price : Infinity);
-    };
-    const _getUnconfirmedPrices = (db, mempool, confirmingMessages, asset) => {
-      let prices = _getConfirmedPrices(db, confirmingMessages, asset);
-      prices = _getPostMessagesPrices(prices, asset, mempool.messages);
-      return prices.map(price => price !== null ? price : Infinity);
-    };
-    const _getPostMessagesPrices = (prices, asset, messages) => prices
-      .concat(
-        messages
-          .map(message => JSON.parse(message.payload))
-          .filter(payloadJson => payloadJson.type === 'price' && payloadJson.asset === asset)
-          .map(({price}) => price)
-      );
     const _checkBlockExists = (blocks, mempool, block) => {
       const checkBlockIndex = block.height - 1;
       const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
@@ -1818,7 +1356,7 @@ class Crds {
           // try to re-add sliced messges; they might not be valid anymore so we can't just append them
           for (let i = 0; i < slicedMessages.length; i++) {
             const slicedMessage = slicedMessages[i];
-            _addMessage(newDb, newBlocks, newMempool, slicedMessage);
+            this.addMessage(newDb, newBlocks, newMempool, slicedMessage);
           }
 
           // XXX need to re-validate whole mempool here, since the new block might have broken validity
@@ -1863,7 +1401,7 @@ class Crds {
 
               _saveState();
 
-              api.emit('block', block);
+              this.api.emit('block', block);
 
               return null;
             } else {
@@ -1875,12 +1413,12 @@ class Crds {
             const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
             const error = block.verify(db, sideChainBlocks);
             if (!error) {
-              const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(dbs, blocks, mempool, block, forkedBlock, sideChainBlocks);
-              dbs = newDbs;
+              const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(this.dbs, this.blocks, this.mempool, block, forkedBlock, sideChainBlocks);
+              this.dbs = newDbs;
               while (dbs.length > UNDO_HEIGHT) {
                 dbs.shift();
               }
-              blocks = newBlocks;
+              this.blocks = newBlocks;
               while (block.length > CHARGE_SETTLE_BLOCKS) {
                 block.shift();
               }
@@ -1889,7 +1427,7 @@ class Crds {
 
               _saveState();
 
-              api.emit('block', block);
+              this.api.emit('block', block);
 
               return null;
             } else {
@@ -1933,27 +1471,6 @@ class Crds {
           status: 400,
           error: 'block exists',
           soft: true,
-        };
-      }
-    };
-    const _addMessage = (db, blocks, mempool, message) => {
-      if (mempool.messages.length < MESSAGES_PER_BLOCK_MAX) {
-        if (!mempool.messages.some(mempoolMessage => mempoolMessage.equals(message))) {
-          const error = message.verify(db, blocks, mempool);
-
-          if (!error) {
-            mempool.messages.push(message);
-
-            api.emit('message', message);
-          }
-          return error;
-        } else {
-          return null;
-        }
-      } else {
-        return {
-          status: 503,
-          error: 'mempool full',
         };
       }
     };
@@ -2028,10 +1545,10 @@ class Crds {
     let numHashes = 0;
     const doHash = () => new Promise((accept, reject) => {
       const version = BLOCK_VERSION;
-      const prevHash = blocks.length > 0 ? blocks[blocks.length - 1].hash : zeroHash;
-      const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+      const prevHash = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].hash : zeroHash;
+      const topBlockHeight = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
       const height = topBlockHeight + 1;
-      const minTimestamp = _getNextBlockMinTimestamp(blocks);
+      const minTimestamp = _getNextBlockMinTimestamp(this.blocks);
       const now = Date.now();
       const timestamp = Math.max(now, minTimestamp);
       const payload = JSON.stringify({type: 'coinbase', asset: CRD, quantity: COINBASE_QUANTITY, address: mineAddress, startHeight: height, timestamp});
@@ -2047,7 +1564,7 @@ class Crds {
       const allMessagesJson = allMessages
         .map(message => JSON.stringify(message))
         .join('\n');
-      const baseDifficulty = _getNextBlockBaseDifficulty(blocks);
+      const baseDifficulty = _getNextBlockBaseDifficulty(this.blocks);
       const bonusDifficulty = _getMessagesDifficulty(allMessages);
       const difficulty = Math.max(baseDifficulty - bonusDifficulty, MIN_DIFFICULTY);
       const target = _getDifficultyTarget(difficulty);
@@ -2217,14 +1734,14 @@ class Crds {
                 newBlocks,
               ]) => {
                 // NOTE: we are assuming no file corruption
-                dbs = newDbs;
-                blocks = newBlocks;
-                _decorateBlocks(blocks);
+                this.dbs = newDbs;
+                this.blocks = newBlocks;
+                _decorateBlocks(this.blocks);
               });
           } else { // nothing to salvage; bootstrap db and do a full sync
-            dbs = [];
-            blocks = [];
-            _decorateBlocks(blocks);
+            this.dbs = [];
+            this.blocks = [];
+            _decorateBlocks(this.blocks);
 
             return Promise.resolve();
           }
@@ -2260,9 +1777,9 @@ class Crds {
               }
             });
           });
-          const zerothDbLocalBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
-          for (let i = 0; i < blocks.length; i++) {
-            const block = blocks[i];
+          const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
+          for (let i = 0; i < this.blocks.length; i++) {
+            const block = this.blocks[i];
             const {height} = block;
             promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
 
@@ -2282,9 +1799,9 @@ class Crds {
                 dbFiles = dbFiles || [];
 
                 const keepDbFiles = [];
-                const zerothDbLocalBlockIndex = Math.max(blocks.length - UNDO_HEIGHT, 0);
-                for (let i = zerothDbLocalBlockIndex; i < blocks.length; i++) {
-                  const block = blocks[i];
+                const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
+                for (let i = zerothDbLocalBlockIndex; i < this.blocks.length; i++) {
+                  const block = this.blocks[i];
                   const {height} = block;
                   keepDbFiles.push(`db-${height}.json`);
                 }
@@ -2330,7 +1847,7 @@ class Crds {
                     }
                   });
                 });
-                const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+                const topBlockHeight = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
                 for (let i = 0; i < blockFiles.length; i++) {
                   const blockFile = blockFiles[i];
                   const match = blockFile.match(/^block-([0-9]+)\.json$/);
@@ -2408,11 +1925,11 @@ class Crds {
           const newPeers = s.split('\n')
             .filter(url => url)
             .map(url => new Peer(url));
-          peers = newPeers;
+          this.peers = newPeers;
 
           accept();
         } else if (err.code === 'ENOENT') {
-          peers = [];
+          this.peers = [];
 
           accept();
         } else {
@@ -2422,7 +1939,7 @@ class Crds {
     });
     const _savePeers = (() => {
       const _doSave = cb => {
-        const peersString = peers.map(({url}) => url).join('\n') + '\n';
+        const peersString = this.peers.map(({url}) => url).join('\n') + '\n';
 
         fs.writeFile(peersDataPath, peersString, err => {
           if (!err) {
@@ -2461,10 +1978,10 @@ class Crds {
 
     const _addPeer = url => {
       const peer = new Peer(url);
-      if (peer.url !== localUrl && !peers.some(p => p.equals(peer))) {
-        peers.push(peer);
+      if (peer.url !== localUrl && !this.peers.some(p => p.equals(peer))) {
+        this.peers.push(peer);
 
-        api.emit('peer', peer.url);
+        this.api.emit('peer', peer.url);
 
         _refreshLivePeers();
 
@@ -2472,11 +1989,11 @@ class Crds {
       }
     };
     const _removePeer = url => {
-      const index = peers.findIndex(peer => peer.url === url);
+      const index = this.peers.findIndex(peer => peer.url === url);
       if (index !== -1) {
-        const peer = peers[index];
+        const peer = this.peers[index];
         peer.disable();
-        peers.splice(index, 1);
+        this.peers.splice(index, 1);
 
         _refreshLivePeers();
 
@@ -2484,8 +2001,8 @@ class Crds {
       }
     };
     const _refreshLivePeers = () => {
-      const enabledPeers = peers.filter(peer => peer.isEnabled());
-      const disabledPeers = peers.filter(peer => !peer.isEnabled());
+      const enabledPeers = this.peers.filter(peer => peer.isEnabled());
+      const disabledPeers = this.peers.filter(peer => !peer.isEnabled());
 
       if (live) {
         while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
@@ -2515,8 +2032,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2534,8 +2050,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2552,8 +2067,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2570,8 +2084,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2588,8 +2101,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2604,8 +2116,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2622,8 +2133,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2638,8 +2148,7 @@ class Crds {
         const signature = eccrypto.sign(privateKeyBuffer, payloadHash)
         const signatureString = signature.toString('base64');
         const message = new Message(payload, payloadHashString, signatureString);
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const error = _addMessage(db, blocks, mempool, message);
+        const error = this.submitMessage(message);
         if (!error) {
           return Promise.resolve();
         } else {
@@ -2725,8 +2234,8 @@ class Crds {
           const {body} = req;
           const message = Message.from(body);
 
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const error = _addMessage(db, blocks, mempool, message);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const error = this.submitMessage(message);
 
           if (!error) {
             res.json({
@@ -2813,13 +2322,13 @@ class Crds {
           });
         }); */
         app.get('/blockcache', (req, res, next) => {
-          res.json(blocks);
+          res.json(this.blocks);
         });
         app.get('/mempool', (req, res, next) => {
-          res.json(mempool);
+          res.json(this.mempool);
         });
         app.get('/peers', (req, res, next) => {
-          const urls = peers.map(({url}) => url);
+          const urls = this.peers.map(({url}) => url);
 
           res.json(urls);
         });
@@ -2866,7 +2375,7 @@ class Crds {
       const _requestListenApi = server => {
         const connections = server[connectionsSymbol];
 
-        api.on('block', block => {
+        this.api.on('block', block => {
           const e = {
             type: 'block',
             block: block,
@@ -2880,7 +2389,7 @@ class Crds {
             }
           }
         });
-        api.on('message', message => {
+        this.api.on('message', message => {
           const e = {
             type: 'message',
             message: message,
@@ -2894,7 +2403,7 @@ class Crds {
             }
           }
         });
-        api.on('peer', peer => {
+        this.api.on('peer', peer => {
           const e = {
             type: 'peer',
             peer: peer,
@@ -2934,8 +2443,9 @@ class Crds {
             },
             getaddress: args => {
               const privateKeyBuffer = crypto.randomBytes(32);
-              const address = _getAddressFromPrivateKey(privateKeyBuffer);
-              console.log(`PrivateKey: ${privateKeyBuffer.toString('base64')} Address: ${address}`);
+              const publicKeyBuffer = _getPublicKey(privateKeyBuffer);
+              const address = _getAddressFromPublicKey(publicKeyBuffer);
+              console.log(`PrivateKey: ${privateKeyBuffer.toString('base64')} PublicKey: ${publicKeyBuffer.toString('base64')} Address: ${address}`);
               process.stdout.write('> ');
             },
             parseaddress: args => {
@@ -3240,7 +2750,7 @@ class Crds {
             lastBlockTime = now;
             numHashes = 0;
 
-            const error = _addBlock(dbs, blocks, mempool, block);
+            const error = _addBlock(this.dbs, this.blocks, this.mempool, block);
             if (!error) {
               const difficulty = _getNextBlockBaseDifficulty(blocks);
               const timeTaken = timeDiff / 1000;
@@ -3280,8 +2790,498 @@ class Crds {
       });
   }
 }
+const _clone = o => JSON.parse(JSON.stringify(o));
+const _getPublicKey = privateKey => eccrypto.getPublic(privateKey);
+const _getAddressFromPublicKey = publicKey => base58.encode(crypto.createHash('sha256').update(publicKey).digest());
+const _getAddressFromPrivateKey = privateKey => _getAddressFromPublicKey(_getPublicKey(privateKey));
+const _isValidAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?(?::mint)?$/.test(asset);
+const _isBasicAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+(\.(?:[A-Z0-9]|(?!^)\-(?!$))+)?$/.test(asset);
+const _isBaseAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+$/.test(asset);
+const _getBaseAsset = asset => asset.match(/^((?:[A-Z0-9]|(?!^)\-(?!$))+)/)[1];
+const _isMintAsset = asset => /:mint$/.test(asset);
+const _getAllConfirmedBalances = db => _clone(db.balances);
+const _getConfirmedBalances = (db, address) => _clone(db.balances[address] || {});
+const _getConfirmedBalance = (db, address, asset) => {
+  let balance = (db.balances[address] || {})[asset];
+  if (balance === undefined) {
+    balance = 0;
+  }
+  return balance;
+};
+const _getAllUnconfirmedBalances = (db, mempool) => {
+  const result = _getAllConfirmedBalances(db);
 
-module.exports = opts => new Crds(opts);
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'coinbase') {
+      const {asset, quantity, address} = payloadJson;
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      addressEntry[asset] = assetEntry + quantity;
+    } else if (type === 'send') {
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
+
+      let srcAddressEntry = result[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        result[srcAddress] = srcAddressEntry;
+      }
+      let srcAssetEntry = srcAddressEntry[asset];
+      if (srcAssetEntry === undefined) {
+        srcAssetEntry = 0;
+      }
+      srcAddressEntry[asset] = srcAssetEntry - quantity;
+
+      let dstAddressEntry = result[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        result[dstAddress] = dstAddressEntry;
+      }
+      let dstAssetEntry = dstAddressEntry[asset];
+      if (dstAssetEntry === undefined) {
+        dstAssetEntry = 0;
+      }
+      dstAddressEntry[asset] = dstAssetEntry + quantity;
+    } else if (type === 'buy') {
+      const {asset, quantity, price, publicKey} = payloadJson;
+      const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let srcAddressEntry = result[srcAddress];
+      if (srcAddressEntry === undefined){
+        srcAddressEntry = {};
+        result[srcAddress] = srcAddressEntry;
+      }
+      let srcAddressDstAssetEntry = srcAddressEntry[CRD];
+      if (srcAddressDstAssetEntry === undefined) {
+        srcAddressDstAssetEntry = 0;
+      }
+      srcAddressDstAssetEntry = srcAddressDstAssetEntry + (quantity * price);
+      srcAddressEntry[CRD] = srcAddressDstAssetEntry;
+
+      let dstAddressEntry = result[dstAddress];
+      if (dstAddressEntry === undefined){
+        dstAddressEntry = {};
+        result[dstAddress] = dstAddressEntry;
+      }
+      let dstAddressSrcAssetEntry = dstAddressEntry[CRD];
+      if (dstAddressSrcAssetEntry === undefined) {
+        dstAddressSrcAssetEntry = 0;
+      }
+      dstAddressSrcAssetEntry = dstAddressSrcAssetEntry - (quantity * price);
+      dstAddressEntry[CRD] = dstAddressSrcAssetEntry;
+
+      let dstAddressDstAssetEntry = dstAddressEntry[asset];
+      if (dstAddressDstAssetEntry === undefined) {
+        dstAddressDstAssetEntry = 0;
+      }
+      dstAddressDstAssetEntry = dstAddressDstAssetEntry + quantity;
+      dstAddressEntry[asset] = dstAddressDstAssetEntry;
+    } else if (type === 'mint') {
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry = assetEntry + quantity;
+      addressEntry[asset] = assetEntry;
+    } else if (type === 'get') {
+      const {address, asset, quantity} = payloadJson;
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      if (assetEntry === undefined) {
+        assetEntry = 0;
+      }
+      assetEntry = assetEntry + quantity;
+      addressEntry[asset] = assetEntry;
+    } else if (type === 'burn') {
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      assetEntry = assetEntry - quantity;
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete result[address];
+        }
+      }
+    } else if (type === 'drop') {
+      const {address, asset, quantity} = payloadJson;
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let assetEntry = addressEntry[asset];
+      assetEntry = assetEntry - quantity;
+      if (assetEntry > 0) {
+        addressEntry[asset] = assetEntry;
+      } else {
+        delete addressEntry[asset];
+
+        if (Object.keys(addressEntry).length === 0) {
+          delete result[address];
+        }
+      }
+    } else if (type === 'minter') {
+      const {asset, publicKey} = payloadJson;
+      const mintAsset = asset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+      let addressEntry = result[address];
+      if (addressEntry === undefined){
+        addressEntry = {};
+        result[address] = addressEntry;
+      }
+      let mintAssetEntry = addressEntry[mintAsset];
+      if (mintAssetEntry === undefined) {
+        mintAssetEntry = 0;
+      }
+      mintAssetEntry = mintAssetEntry + 1;
+      addressEntry[mintAsset] = mintAssetEntry;
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedBalances = (db, mempool, address) => {
+  let result = _getConfirmedBalances(db, address);
+
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'coinbase') {
+      const {asset, quantity, address: localAddress} = payloadJson;
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = assetEntry + quantity;
+      }
+    } else if (type === 'send') {
+      const {asset, quantity, srcAddress, dstAddress} = payloadJson;
+
+      if (srcAddress === address) {
+        let srcAssetEntry = result[asset];
+        if (srcAssetEntry === undefined) {
+          srcAssetEntry = 0;
+        }
+        result[asset] = srcAssetEntry - quantity;
+      }
+
+      if (dstAddress === address) {
+        let dstAssetEntry = result[asset];
+        if (dstAssetEntry === undefined) {
+          dstAssetEntry = 0;
+        }
+        result[asset] = dstAssetEntry + quantity;
+      }
+    } else if (type === 'buy') {
+      const {asset, quantity, price, publicKey} = payloadJson;
+      const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (srcAddress === address) {
+        let assetEntry = result[CRD];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[CRD] = assetEntry + (price * quantity);
+      }
+
+      if (dstAddress === address) {
+        let crdEntry = result[CRD];
+        if (crdEntry === undefined) {
+          crdEntry = 0;
+        }
+        result[CRD] = crdEntry - (price * quantity);
+
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        result[asset] = assetEntry + quantity;
+      }
+    } else if (type === 'mint') {
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        assetEntry = assetEntry + quantity;
+        result[asset] = assetEntry;
+      }
+    } else if (type === 'get') {
+      const {address: localAddress, asset, quantity} = payloadJson;
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        if (assetEntry === undefined) {
+          assetEntry = 0;
+        }
+        assetEntry = assetEntry + quantity;
+        result[asset] = assetEntry;
+      }
+    } else if (type === 'burn') {
+      const {asset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        assetEntry = assetEntry - quantity;
+        if (assetEntry > 0) {
+          result[asset] = assetEntry;
+        } else {
+          delete result[asset];
+        }
+      }
+    } else if (type === 'drop') {
+      const {address: localAddress, asset, quantity} = payloadJson;
+
+      if (localAddress === address) {
+        let assetEntry = result[asset];
+        assetEntry = assetEntry - quantity;
+        if (assetEntry > 0) {
+          result[asset] = assetEntry;
+        } else {
+          delete result[asset];
+        }
+      }
+    } else if (type === 'minter') {
+      const {asset, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address) {
+        const mintAsset = asset + ':mint';
+
+        let mintAssetEntry = result[mintAsset];
+        if (mintAssetEntry === undefined) {
+          mintAssetEntry = 0;
+        }
+        mintAssetEntry = mintAssetEntry + 1;
+        result[mintAsset] = mintAssetEntry;
+      }
+    }
+  }
+
+  return result;
+};
+const _getUnconfirmedBalance = (db, mempool, address, asset) => {
+  let result = _getConfirmedBalance(db, address, asset);
+
+  for (let i = 0; i < mempool.messages.length; i++) {
+    const message = mempool.messages[i];
+    const payloadJson = JSON.parse(message.payload);
+    const {type} = payloadJson;
+
+    if (type === 'coinbase') {
+      const {asset: localAsset, quantity, address: localAddress} = payloadJson;
+
+      if (localAsset === asset && localAddress === address) {
+        result = result + quantity;
+      }
+    } else if (type === 'send') {
+      const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
+
+      if (a === asset) {
+        if (srcAddress === address) {
+          result = result - quantity;
+        }
+        if (dstAddress === address) {
+          result = result + quantity;
+        }
+      }
+    } else if (type === 'buy') {
+      const {address: localAddress, asset: localAsset} = payloadJson;
+
+      if (asset === CRD) {
+        const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
+
+        if (address === minter) {
+          const {quantity, price} = payloadJson;
+          result = result + (price * quantity);
+        }
+        if (address === localAddress) {
+          result = result - (price * quantity);
+        }
+      } else {
+        if (address === localAddress && asset === localAsset) {
+          const {quantity, price} = payloadJson;
+          result = result + quantity;
+        }
+      }
+    } else if (type === 'mint') {
+      const {asset: localAsset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address && localAsset === asset) {
+        result = result + quantity;
+      }
+    } else if (type === 'get') {
+      const {address: localAddress, asset: localAsset, quantity} = payloadJson;
+
+      if (localAddress === address && localAsset === asset) {
+        result = result + quantity;
+      }
+    } else if (type === 'burn') {
+      const {asset: localAsset, quantity, publicKey} = payloadJson;
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address && localAsset === asset) {
+        result = result - quantity;
+      }
+    } else if (type === 'drop') {
+      const {address: localAddress, asset: localAsset, quantity} = payloadJson;
+
+      if (localAddress === address && localAsset === asset) {
+        result = result - quantity;
+      }
+    } else if (type === 'minter') {
+      const {asset: localAsset, publicKey} = payloadJson;
+      const mintAsset = localAsset + ':mint';
+      const publicKeyBuffer = new Buffer(publicKey, 'base64');
+      const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
+
+      if (localAddress === address && mintAsset === asset) {
+        result = result + 1;
+      }
+    }
+  }
+
+  return result;
+};
+const _getConfirmedMinter = (db, confirmingMessages, asset) => {
+  let minter = db.minters[asset];
+  minter = _getPostMessagesMinter(minter, asset, confirmingMessages);
+  return minter;
+};
+const _getUnconfirmedMinter = (db, mempool, confirmingMessages, asset) => {
+  let minter = _getConfirmedMinter(db, confirmingMessages, asset);
+  minter = _getPostMessagesMinter(minter, asset, mempool.messages);
+  return minter;
+};
+const _getPostMessagesMinter = (minter, asset, messages) => {
+  const mintMessages = messages.filter(message => {
+    const payloadJson = JSON.parse(message.payload);
+    return (payloadJson.type === 'minter' && payloadJson.asset === asset) ||
+      (payloadJson.type === 'send' && payloadJson.asset === (asset + ':mint'));
+  });
+
+  let done = false;
+  while (mintMessages.length > 0 && !done) {
+    done = true;
+
+    for (let i = 0; i < mintMessages.length; i++) {
+      const message = mintMessages[i];
+      const payloadJson = JSON.parse(message.payload);
+      const {type} = payloadJson;
+
+      if (type === 'minter') {
+        if (minter === undefined) {
+          const {publicKey} = payloadJson;
+          const publicKeyBuffer = new Buffer(publicKey, 'base64');
+          const address = _getAddressFromPublicKey(publicKeyBuffer);
+
+          minter = address;
+          done = false;
+          mintMessages.splice(i, 1);
+          break;
+        }
+      } else if (type === 'send') {
+        const {srcAddress} = payloadJson;
+
+        if (minter === srcAddress) {
+          const {dstAddress} = payloadJson;
+
+          minter = dstAddress;
+          mintMessages.splice(i, 1);
+          done = false;
+          break;
+        }
+      }
+    }
+  }
+
+  return minter;
+};
+const _getConfirmedPrice = (db, confirmingMessages, asset) => {
+  const prices = _getConfirmedPrices(db, confirmingMessages, asset);
+  return prices[prices.length - 1];
+};
+const _getUnconfirmedPrice = (db, mempool, confirmingMessages, asset) => {
+  const prices = _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
+  return prices[prices.length - 1];
+};
+const _getConfirmedPrices = (db, confirmingMessages, asset) => {
+  let prices = [typeof db.prices[asset] === 'number' ? db.prices[asset] : Infinity];
+  prices = _getPostMessagesPrices(prices, asset, confirmingMessages);
+  return prices.map(price => price !== null ? price : Infinity);
+};
+const _getUnconfirmedPrices = (db, mempool, confirmingMessages, asset) => {
+  let prices = _getConfirmedPrices(db, confirmingMessages, asset);
+  prices = _getPostMessagesPrices(prices, asset, mempool.messages);
+  return prices.map(price => price !== null ? price : Infinity);
+};
+const _getPostMessagesPrices = (prices, asset, messages) => prices
+  .concat(
+    messages
+      .map(message => JSON.parse(message.payload))
+      .filter(payloadJson => payloadJson.type === 'price' && payloadJson.asset === asset)
+      .map(({price}) => price)
+  );
+
+const crds = opts => new Crds(opts);
+module.exports = crds;
 
 if (!module.parent) {
   const args = process.argv.slice(2);
@@ -3300,10 +3300,10 @@ if (!module.parent) {
   const dataDirectory = _findArg('dataDirectory') || DEFAULTS.dataDirectory;
 
   new Crds({
+    dataDirectory,
+    cli: true,
+  }).listen({
     host,
     port,
-    dataDirectory,
-  }).listen({
-    cli: true,
   });
 }

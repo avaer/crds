@@ -19,7 +19,9 @@
     "ws": "^3.0.0"
   },
   "devDependencies": {
+    "fast-sha256": "^1.0.0",
     "getport": "^0.1.0",
+    "node-fetch": "^1.7.1",
     "tmp": "0.0.31"
   },
   "scripts": {
