@@ -18,9 +18,12 @@
     "write-file-atomic": "^2.1.0",
     "ws": "^3.0.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "getport": "^0.1.0",
+    "tmp": "0.0.31"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha test.js"
   },
   "repository": {
     "type": "git",

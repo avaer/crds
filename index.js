@@ -3217,12 +3217,15 @@ class Crds {
         return Promise.resolve();
       };
 
-      _requestServer()
-        .then(server => Promise.all([
-          _requestRefreshPeers(),
-          _requestListenApi(server),
-          _requestCli(server),
-        ]));
+      return _requestServer()
+        .then(server =>
+          Promise.all([
+            _requestRefreshPeers(),
+            _requestListenApi(server),
+            _requestCli(server),
+          ])
+            .then(() => server)
+        );
     };
 
     let mineAddress = null;
@@ -3270,7 +3273,11 @@ class Crds {
     ])
       .then(() => _ensureDataPaths())
       .then(() => _listen())
-      .then(() => localUrl);
+      .then(server => {
+        return cb => {
+          server.close(cb);
+        };
+      });
   }
 }
 
