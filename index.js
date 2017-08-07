@@ -352,7 +352,7 @@ class Message {
                     } else {
                       const price = !mempool ? _getConfirmedPrice(db, confirmingMessages, baseAsset) : _getUnconfirmedPrice(db, mempool, confirmingMessages, baseAsset);
 
-                      if (price > 0) {
+                      if (price === 0) {
                         return null;
                       } else {
                         return {
@@ -2175,11 +2175,8 @@ class Crds extends EventEmitter {
               ok: true,
             });
           } else {
-            const errorString = error.error || error.stack;
             res.status(error.status || 500);
-            res.json({error: errorString});
-
-            console.warn(errorString);
+            res.json({error: error.error || error.stack});
           }
         });
         app.post('/mine', bodyParserJson, (req, res, next) => {

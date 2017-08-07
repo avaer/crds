@@ -262,6 +262,31 @@ describe('messages', () => {
         expect(JSON.parse(mempool.messages[2].payload).type).toBe('send');
       });
   });
+
+  it('should reject invalid mint', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM', 100, privateKey2)),
+      }))
+      .then(_resJson)
+      .then(() => {
+        return Promise.reject(new Error('did not reject message'));
+      })
+      .catch(err => {
+        if (err.status === 400) {
+          return Promise.resolve();
+        } else {
+          return Promise.reject(err);
+        }
+      });
+  });
 });
 
 });
