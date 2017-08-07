@@ -276,7 +276,7 @@ class Message {
               if (eccrypto.verify(publicKeyBuffer, payloadHash, signatureBuffer) && _getAddressFromPublicKey(publicKeyBuffer) === srcAddress) {
                 if (_isValidAsset(asset)) {
                   if (quantity > 0 && Math.floor(quantity) === quantity && (!_isMintAsset(asset) || quantity === 1)) {
-                    const balance = !mempool ? _getConfirmedBalance(db, srcAddress, asset) : _getUnconfirmedBalance(db, mempool, srcAddress, asset);
+                    const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, srcAddress, asset) : _getUnconfirmedBalance(db, mempool, confirmingMessages, srcAddress, asset);
 
                     if (balance >= quantity) {
                       return null;
@@ -453,7 +453,7 @@ class Message {
                       }
                     };
                     const _checkBalance = () => {
-                      const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
+                      const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, address, asset) : _getUnconfirmedBalance(db, mempool, confirmingMessages, address, asset);
 
                       if (balance >= quantity) {
                         return null;
@@ -513,7 +513,7 @@ class Message {
                       }
                     };
                     const _checkBalance = () => {
-                      const balance = !mempool ? _getConfirmedBalance(db, address, asset) : _getUnconfirmedBalance(db, mempool, address, asset);
+                      const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, address, asset) : _getUnconfirmedBalance(db, mempool, confirmingMessages, address, asset);
 
                       if (balance >= quantity) {
                         return null;
@@ -599,7 +599,7 @@ class Message {
                         const prices = !mempool ? _getConfirmedPrices(db, confirmingMessages, asset) : _getUnconfirmedPrices(db, mempool, confirmingMessages, asset);
 
                         if (prices.includes(price)) {
-                          const balance = !mempool ? _getConfirmedBalance(db, address, CRD) : _getUnconfirmedBalance(db, mempool, address, CRD);
+                          const balance = !mempool ? _getConfirmedBalance(db, confirmingMessages, address, CRD) : _getUnconfirmedBalance(db, confirmingMessages, mempool, address, CRD);
 
                           if (balance >= (quantity * price)) {
                             return null;
@@ -2118,25 +2118,25 @@ class Crds extends EventEmitter {
         app.get('/balances/:address', (req, res, next) => {
           const {address} = req.params;
           const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
-          const balances = _getConfirmedBalances(db, address);
+          const balances = _getConfirmedBalances(db, [], address);
           res.json(balances);
         });
         app.get('/balance/:address/:asset', (req, res, next) => {
           const {address, asset} = req.params;
           const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
-          const balance = _getConfirmedBalance(db, address, asset);
+          const balance = _getConfirmedBalance(db, [], address, asset);
           res.json(balance);
         });
         app.get('/unconfirmedBalances/:address', (req, res, next) => {
           const {address} = req.params;
           const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
-          const balances = _getUnconfirmedBalances(db, this.mempool, address);
+          const balances = _getUnconfirmedBalances(db, this.mempool, [], address);
           res.json(balances);
         });
         app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
           const {address, asset} = req.params;
           const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
-          const balance = _getUnconfirmedBalance(db, this.mempool, address, asset);
+          const balance = _getUnconfirmedBalance(db, this.mempool, [], address, asset);
           res.json(balance);
         });
         app.get('/minter/:asset', (req, res, next) => {
@@ -2396,14 +2396,14 @@ class Crds extends EventEmitter {
 
               if (address && asset) {
                 const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-                const balance = _getUnconfirmedBalance(db, mempool, address, asset);
+                const balance = _getUnconfirmedBalance(db, mempool, [], address, asset);
                 console.log(JSON.stringify(balance, null, 2));
                 const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
                 console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
                 process.stdout.write('> ')
               } else if (address) {
                 const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-                const balances = _getUnconfirmedBalances(db, mempool, address);
+                const balances = _getUnconfirmedBalances(db, mempool, [], address);
                 console.log(JSON.stringify(balances, null, 2));
                 const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
                 console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
@@ -2738,13 +2738,18 @@ const _isBaseAsset = asset => /^(?:[A-Z0-9]|(?!^)\-(?!$))+$/.test(asset);
 const _getBaseAsset = asset => asset.match(/^((?:[A-Z0-9]|(?!^)\-(?!$))+)/)[1];
 const _isMintAsset = asset => /:mint$/.test(asset);
 const _getAllConfirmedBalances = db => _clone(db.balances);
-const _getConfirmedBalances = (db, address) => _clone(db.balances[address] || {});
-const _getConfirmedBalance = (db, address, asset) => {
-  let balance = (db.balances[address] || {})[asset];
-  if (balance === undefined) {
-    balance = 0;
+const _getConfirmedBalances = (db, confirmingMessages, address) => {
+  let result = _clone(db.balances[address] || {});
+  result = _getPostMessagesBalances(result, db, null, confirmingMessages, address, confirmingMessages);
+  return result;
+};
+const _getConfirmedBalance = (db, confirmingMessages, address, asset) => {
+  let result = (db.balances[address] || {})[asset];
+  if (result === undefined) {
+    result = 0;
   }
-  return balance;
+  result = _getPostMessagesBalance(result, db, null, confirmingMessages, address, asset, confirmingMessages);
+  return result;
 };
 const _getAllUnconfirmedBalances = (db, mempool) => {
   const result = _getAllConfirmedBalances(db);
@@ -2919,11 +2924,14 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
 
   return result;
 };
-const _getUnconfirmedBalances = (db, mempool, address) => {
-  let result = _getConfirmedBalances(db, address);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
+const _getUnconfirmedBalances = (db, mempool, confirmingMessages, address) => {
+  let result = _getConfirmedBalances(db, confirmingMessages, address);
+  result = _getPostMessagesBalances(result, db, mempool, confirmingMessages, address, mempool.messages);
+  return result;
+};
+const _getPostMessagesBalances = (balances, db, mempool, confirmingMessages, address, messages) => {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -2931,56 +2939,56 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       const {asset, quantity, address: localAddress} = payloadJson;
 
       if (localAddress === address) {
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[asset] = assetEntry + quantity;
+        balances[asset] = assetEntry + quantity;
       }
     } else if (type === 'send') {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (srcAddress === address) {
-        let srcAssetEntry = result[asset];
+        let srcAssetEntry = balances[asset];
         if (srcAssetEntry === undefined) {
           srcAssetEntry = 0;
         }
-        result[asset] = srcAssetEntry - quantity;
+        balances[asset] = srcAssetEntry - quantity;
       }
 
       if (dstAddress === address) {
-        let dstAssetEntry = result[asset];
+        let dstAssetEntry = balances[asset];
         if (dstAssetEntry === undefined) {
           dstAssetEntry = 0;
         }
-        result[asset] = dstAssetEntry + quantity;
+        balances[asset] = dstAssetEntry + quantity;
       }
     } else if (type === 'buy') {
       const {asset, quantity, price, publicKey} = payloadJson;
-      const srcAddress = _getUnconfirmedMinter(db, mempool, [], asset);
+      const srcAddress = !mempool ? _getConfirmedMinter(db, confirmingMessages, asset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, asset);
       const publicKeyBuffer = new Buffer(publicKey, 'base64');
       const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (srcAddress === address) {
-        let assetEntry = result[CRD];
+        let assetEntry = balances[CRD];
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[CRD] = assetEntry + (price * quantity);
+        balances[CRD] = assetEntry + (price * quantity);
       }
 
       if (dstAddress === address) {
-        let crdEntry = result[CRD];
+        let crdEntry = balances[CRD];
         if (crdEntry === undefined) {
           crdEntry = 0;
         }
-        result[CRD] = crdEntry - (price * quantity);
+        balances[CRD] = crdEntry - (price * quantity);
 
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
-        result[asset] = assetEntry + quantity;
+        balances[asset] = assetEntry + quantity;
       }
     } else if (type === 'mint') {
       const {asset, quantity, publicKey} = payloadJson;
@@ -2988,23 +2996,23 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address) {
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
         assetEntry = assetEntry + quantity;
-        result[asset] = assetEntry;
+        balances[asset] = assetEntry;
       }
     } else if (type === 'get') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
       if (localAddress === address) {
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         if (assetEntry === undefined) {
           assetEntry = 0;
         }
         assetEntry = assetEntry + quantity;
-        result[asset] = assetEntry;
+        balances[asset] = assetEntry;
       }
     } else if (type === 'burn') {
       const {asset, quantity, publicKey} = payloadJson;
@@ -3012,24 +3020,24 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address) {
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         assetEntry = assetEntry - quantity;
         if (assetEntry > 0) {
-          result[asset] = assetEntry;
+          balances[asset] = assetEntry;
         } else {
-          delete result[asset];
+          delete balances[asset];
         }
       }
     } else if (type === 'drop') {
       const {address: localAddress, asset, quantity} = payloadJson;
 
       if (localAddress === address) {
-        let assetEntry = result[asset];
+        let assetEntry = balances[asset];
         assetEntry = assetEntry - quantity;
         if (assetEntry > 0) {
-          result[asset] = assetEntry;
+          balances[asset] = assetEntry;
         } else {
-          delete result[asset];
+          delete balances[asset];
         }
       }
     } else if (type === 'minter') {
@@ -3040,23 +3048,26 @@ const _getUnconfirmedBalances = (db, mempool, address) => {
       if (localAddress === address) {
         const mintAsset = asset + ':mint';
 
-        let mintAssetEntry = result[mintAsset];
+        let mintAssetEntry = balances[mintAsset];
         if (mintAssetEntry === undefined) {
           mintAssetEntry = 0;
         }
         mintAssetEntry = mintAssetEntry + 1;
-        result[mintAsset] = mintAssetEntry;
+        balances[mintAsset] = mintAssetEntry;
       }
     }
   }
 
+  return balances;
+};
+const _getUnconfirmedBalance = (db, mempool, confirmingMessages, address, asset) => {
+  let result = _getConfirmedBalance(db, confirmingMessages, address, asset);
+  result = _getPostMessagesBalance(result, db, mempool, confirmingMessages, address, asset, mempool.messages);
   return result;
 };
-const _getUnconfirmedBalance = (db, mempool, address, asset) => {
-  let result = _getConfirmedBalance(db, address, asset);
-
-  for (let i = 0; i < mempool.messages.length; i++) {
-    const message = mempool.messages[i];
+const _getPostMessagesBalance = (balance, db, mempool, confirmingMessages, address, asset, messages) => {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     const payloadJson = JSON.parse(message.payload);
     const {type} = payloadJson;
 
@@ -3064,36 +3075,36 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
       const {asset: localAsset, quantity, address: localAddress} = payloadJson;
 
       if (localAsset === asset && localAddress === address) {
-        result = result + quantity;
+        balance = balance + quantity;
       }
     } else if (type === 'send') {
       const {asset: a, quantity, srcAddress, dstAddress} = payloadJson;
 
       if (a === asset) {
         if (srcAddress === address) {
-          result = result - quantity;
+          balance = balance - quantity;
         }
         if (dstAddress === address) {
-          result = result + quantity;
+          balance = balance + quantity;
         }
       }
     } else if (type === 'buy') {
       const {address: localAddress, asset: localAsset} = payloadJson;
 
       if (asset === CRD) {
-        const minter = _getUnconfirmedMinter(db, mempool, [], localAsset);
+        const minter = !mempool ? _getConfirmedMinter(db, confirmingMessages, localAsset) : _getUnconfirmedMinter(db, mempool, confirmingMessages, localAsset);
 
         if (address === minter) {
           const {quantity, price} = payloadJson;
-          result = result + (price * quantity);
+          balance = balance + (price * quantity);
         }
         if (address === localAddress) {
-          result = result - (price * quantity);
+          balance = balance - (price * quantity);
         }
       } else {
         if (address === localAddress && asset === localAsset) {
           const {quantity, price} = payloadJson;
-          result = result + quantity;
+          balance = balance + quantity;
         }
       }
     } else if (type === 'mint') {
@@ -3102,13 +3113,13 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
       const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address && localAsset === asset) {
-        result = result + quantity;
+        balance = balance + quantity;
       }
     } else if (type === 'get') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
-        result = result + quantity;
+        balance = balance + quantity;
       }
     } else if (type === 'burn') {
       const {asset: localAsset, quantity, publicKey} = payloadJson;
@@ -3116,13 +3127,13 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
       const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address && localAsset === asset) {
-        result = result - quantity;
+        balance = balance - quantity;
       }
     } else if (type === 'drop') {
       const {address: localAddress, asset: localAsset, quantity} = payloadJson;
 
       if (localAddress === address && localAsset === asset) {
-        result = result - quantity;
+        balance = balance - quantity;
       }
     } else if (type === 'minter') {
       const {asset: localAsset, publicKey} = payloadJson;
@@ -3131,12 +3142,12 @@ const _getUnconfirmedBalance = (db, mempool, address, asset) => {
       const localAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       if (localAddress === address && mintAsset === asset) {
-        result = result + 1;
+        balance = balance + 1;
       }
     }
   }
 
-  return result;
+  return balance;
 };
 const _getConfirmedMinter = (db, confirmingMessages, asset) => {
   let minter = db.minters[asset];

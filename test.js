@@ -433,7 +433,7 @@ describe('balances', () => {
           .then(balance => {
             expect(balance).toBe(98);
           }),
-        fetch(`http://${b.host}:${b.port}/balance/${address}`)
+        fetch(`http://${b.host}:${b.port}/balances/${address}`)
           .then(_resJson)
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(1);
@@ -449,7 +449,7 @@ describe('balances', () => {
           .then(balance => {
             expect(balance).toBe(2);
           }),
-        fetch(`http://${b.host}:${b.port}/balance/${address2}`)
+        fetch(`http://${b.host}:${b.port}/balances/${address2}`)
           .then(_resJson)
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(undefined);
