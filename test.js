@@ -6,6 +6,12 @@ const {Headers} = fetch;
 const fastSha256 = require('fast-sha256');
 const secp256k1 = require('eccrypto-sync/secp256k1');
 
+const jsonHeaders = (() => {
+  const headers = new Headers();
+  headers.append('Content-Type', 'application/json');
+  return headers;
+})();
+
 const privateKey = new Buffer('MXNo7tDiY1soVtglOo7Va1HH06i6d6r7cizypViPPxs=', 'base64');
 const publicKey = new Buffer('BFIrtpnhr6PWm4jzBzMJjFphs4WZwGsaqSk2Y+4zDJa9aK/kJByIBleRWDdBM6TgwuQ0DirXCulpKmzlfI2ytUU=', 'base64');
 const address = 'EvfZY8ic4vz97A93MhuKkNi79i75AH1RtAeZcPN77NqC';
@@ -46,85 +52,117 @@ const _resJson = res => {
   }
 };
 
-const cleanups = [];
-let tmpdir;
-const host = '127.0.0.1';
-let port;
+const _boot = () => {
+  const cleanups = [];
 
-before(() => {
   return Promise.all([
+    Promise.resolve('127.0.0.1'),
+    new Promise((accept, reject) => {
+      getport((err, p) => {
+        if (!err) {
+          accept(p);
+        } else {
+          reject(err);
+        }
+      });
+    }),
     new Promise((accept, reject) => {
       tmp.dir({
         unsafeCleanup: true,
       }, (err, p, cleanup) => {
         if (!err) {
-          tmpdir = p;
-
           cleanups.push(cleanup);
 
-          accept();
+          accept(p);
         } else {
           reject(err);
         }
       });
     }),
-    new Promise((accept, reject) => {
-      getport((err, p) => {
-        if (!err) {
-          port = p;
-
-          accept();
-        } else {
-          reject(err);
-        }
+  ])
+    .then(([
+      host,
+      port,
+      tmpdir,
+    ]) => {
+      const c = crds({
+        dataDirectory: tmpdir,
       });
-    }),
-  ]);
-});
-after(() => {
-  return Promise.all(cleanups.map(cleanup => new Promise((accept, reject) => {
-    cleanup(err => {
-      if (!err) {
-        accept();
-      } else {
-        reject(err);
-      }
-    });
-  })));
-});
-
-describe('messages', () => {
-  let c;
-  let cleanup;
-
-  before(() => {
-    c = crds({
-      dataDirectory: tmpdir,
-    });
-
-    return c
-      .listen({
+      return c.listen({
         host,
         port,
       })
       .then(destroy => {
-        cleanup = destroy;
+        cleanups.push(destroy);
+
+        return {
+          c,
+          host,
+          port,
+          tmpdir,
+          cleanup: () => Promise.all(cleanups.map(cleanup => new Promise((accept, reject) => {
+            cleanup(err => {
+              if (!err) {
+                accept();
+              } else {
+                reject(err);
+              }
+            });
+          }))),
+        };
+      });
+    });
+};
+
+// mining
+
+describe('mining', () => {
+  let b;
+  before(() => {
+    return _boot()
+      .then(newB => {
+        b = newB;
       });
   });
-  after(cb => {
-    cleanup(cb);
-  })
+  after(() => b.cleanup());
+
+  it('should mine a block', () => {
+    const message = _makeMinterMessage('ITEM', privateKey);
+
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ]);
+  });
+});
+
+// messages
+
+describe('messages', () => {
+  let b;
+  before(() => {
+    return _boot()
+      .then(newB => {
+        b = newB;
+      });
+  });
+  after(() => b.cleanup());
 
   it('should add message', () => {
     const message = _makeMinterMessage('ITEM', privateKey);
 
-    return fetch(`http://${host}:${port}/submitMessage`, {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
       method: 'POST',
-      headers: (() => {
-        const headers = new Headers();
-        headers.append('Content-Type', 'application/json');
-        return headers;
-      })(),
+      headers: jsonHeaders,
       body: JSON.stringify(message),
     })
       .then(_resJson);

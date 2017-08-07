@@ -61,6 +61,17 @@ const DEFAULT_MEMPOOL = {
   blocks: [],
   messages: [],
 };
+const maxTarget = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
+const _getDifficultyTarget = difficulty => maxTarget
+  .divide(bigint(Math.round(difficulty)));
+const _getHashDifficulty = hash => bigint(hash, 16)
+  .divide(maxTarget)
+  .valueOf();
+const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
+const initialDifficulty = 1e5;
+const initialTarget = _getDifficultyTarget(initialDifficulty);
+const zeroHash = bigint(0).toString(16);
+const connectionsSymbol = Symbol();
 
 class Block {
   constructor(hash, prevHash, height, difficulty, version, timestamp, messages, nonce) {
@@ -893,11 +904,13 @@ class Peer {
   }
 }
 
-class Crds {
+class Crds extends EventEmitter {
   constructor({
     dataDirectory = DEFAULTS.dataDirectory,
     cli = DEFAULTS.cli,
   } = {}) {
+    super();
+
     this.dataDirectory = dataDirectory;
     this.cli = cli;
 
@@ -905,7 +918,6 @@ class Crds {
     this.blocks = [];
     this.mempool = _clone(DEFAULT_MEMPOOL);
     this.peers = [];
-    this.api = new EventEmitter();
   }
 
   submitMessage(message) {
@@ -921,7 +933,7 @@ class Crds {
         if (!error) {
           mempool.messages.push(message);
 
-          this.api.emit('message', message);
+          this.emit('message', message);
         }
         return error;
       } else {
@@ -942,20 +954,7 @@ class Crds {
     const {dataDirectory, cli} = this;
 
     const localUrl = `http://${host}:${port}`;
-
     let live = true;
-
-    const maxTarget = bigint('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', 16);
-    const _getDifficultyTarget = difficulty => maxTarget
-      .divide(bigint(Math.round(difficulty)));
-    const _getHashDifficulty = hash => bigint(hash, 16)
-      .divide(maxTarget)
-      .valueOf();
-    const _checkHashMeetsTarget = (hash, target) => bigint(hash, 16).leq(target);
-    const initialDifficulty = 1e5;
-    const initialTarget = _getDifficultyTarget(initialDifficulty);
-    const zeroHash = bigint(0).toString(16);
-    const connectionsSymbol = Symbol();
 
     const _checkBlockExists = (blocks, mempool, block) => {
       const checkBlockIndex = block.height - 1;
@@ -1401,7 +1400,7 @@ class Crds {
 
               _saveState();
 
-              this.api.emit('block', block);
+              this.emit('block', block);
 
               return null;
             } else {
@@ -1427,7 +1426,7 @@ class Crds {
 
               _saveState();
 
-              this.api.emit('block', block);
+              this.emit('block', block);
 
               return null;
             } else {
@@ -1475,72 +1474,6 @@ class Crds {
       }
     };
 
-    const _getNextBlockMinTimestamp = blocks => {
-      const checkBlocks = blocks.slice(-TARGET_BLOCKS);
-      const sortedCheckBlocks = checkBlocks.slice()
-        .sort((a, b) => a.timestamp - b.timestamp);
-      const medianTimestamp = (() => {
-        if (sortedCheckBlocks.length > 0) {
-          const middleIndex = Math.floor((sortedCheckBlocks.length - 1) / 2);
-
-          if (sortedCheckBlocks.length % 2) {
-              return sortedCheckBlocks[middleIndex].timestamp;
-          } else {
-              return (sortedCheckBlocks[middleIndex].timestamp + sortedCheckBlocks[middleIndex + 1].timestamp) / 2;
-          }
-        } else {
-          return 0;
-        }
-      })();
-      return medianTimestamp;
-    };
-    const _getNextBlockBaseDifficulty = blocks => {
-      const checkBlocks = blocks.slice(-TARGET_BLOCKS);
-      const checkBlocksTimeDiff = (() => {
-        if (checkBlocks.length > 0) {
-          let firstCheckBlock = null;
-          let lastCheckBlock = null;
-          for (let i = 0; i < checkBlocks.length; i++) {
-            const checkBlock = checkBlocks[i];
-
-            if (firstCheckBlock === null || checkBlock.timestamp < firstCheckBlock.timestamp) {
-              firstCheckBlock = checkBlock;
-            }
-            if (lastCheckBlock === null || checkBlock.timestamp > lastCheckBlock.timestamp) {
-              lastCheckBlock = checkBlock;
-            }
-          }
-          return lastCheckBlock.timestamp - firstCheckBlock.timestamp;
-        } else {
-          return 0;
-        }
-      })();
-      const expectedTimeDiff = TARGET_TIME;
-      const averageDifficulty = (() => {
-        if (checkBlocks.length > 0) {
-          let acc = 0;
-          for (let i = 0; i < checkBlocks.length; i++) {
-            const checkBlock = checkBlocks[i];
-            acc += checkBlock.difficulty;
-          }
-          return acc / checkBlocks.length;
-        } else {
-          return 0;
-        }
-      })();
-      const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
-      const newDifficulty = Math.max(averageDifficulty / accuracyFactor, MIN_DIFFICULTY);
-      return newDifficulty;
-    };
-    const _getMessagesDifficulty = messages => {
-      let result = 0;
-      for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
-        result += _getHashDifficulty(message.hash);
-      }
-      return result;
-    };
-
     let lastBlockTime = Date.now();
     let numHashes = 0;
     const doHash = () => new Promise((accept, reject) => {
@@ -1558,7 +1491,7 @@ class Crds {
       const signature = eccrypto.sign(privateKeyBuffer, payloadHash);
       const signatureString = signature.toString('base64');
       const coinbaseMessage = new Message(payload, payloadHashString, signatureString);
-      const allMessages = mempool.messages
+      const allMessages = this.mempool.messages
         .slice(0, MESSAGES_PER_BLOCK_MAX - 1) // -1 for coinbase
         .concat(coinbaseMessage);
       const allMessagesJson = allMessages
@@ -1785,7 +1718,7 @@ class Crds {
 
             if (i >= zerothDbLocalBlockIndex) {
               const dbIndex = i - zerothDbLocalBlockIndex;
-              const db = dbs[dbIndex];
+              const db = this.dbs[dbIndex];
               promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
             }
           }
@@ -1981,7 +1914,7 @@ class Crds {
       if (peer.url !== localUrl && !this.peers.some(p => p.equals(peer))) {
         this.peers.push(peer);
 
-        this.api.emit('peer', peer.url);
+        this.emit('peer', peer.url);
 
         _refreshLivePeers();
 
@@ -2169,7 +2102,7 @@ class Crds {
         });
 
         app.get('/status', (req, res, next) => {
-          const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+          const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
           const timestamp = Date.now();
 
           res.json({
@@ -2178,56 +2111,56 @@ class Crds {
           });
         });
         app.get('/assets', (req, res, next) => {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const assets = Object.keys(db.minters);
           res.json(assets);
         });
         app.get('/balances/:address', (req, res, next) => {
           const {address} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const balances = _getConfirmedBalances(db, address);
           res.json(balances);
         });
         app.get('/balance/:address/:asset', (req, res, next) => {
           const {address, asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const balance = _getConfirmedBalance(db, address, asset);
           res.json(balance);
         });
         app.get('/unconfirmedBalances/:address', (req, res, next) => {
           const {address} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balances = _getUnconfirmedBalances(db, mempool, address);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const balances = _getUnconfirmedBalances(db, this.mempool, address);
           res.json(balances);
         });
         app.get('/unconfirmedBalance/:address/:asset', (req, res, next) => {
           const {address, asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balance = _getUnconfirmedBalance(db, mempool, address, asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const balance = _getUnconfirmedBalance(db, this.mempool, address, asset);
           res.json(balance);
         });
         app.get('/minter/:asset', (req, res, next) => {
           const {asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const minter = _getConfirmedMinter(db, [], asset);
           res.json(minter);
         });
         app.get('/unconfirmedMinter/:asset', (req, res, next) => {
           const {asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const minter = _getUnconfirmedMinter(db, mempool, [], asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const minter = _getUnconfirmedMinter(db, this.mempool, [], asset);
           res.json(minter);
         });
         app.get('/price/:asset', (req, res, next) => {
           const {asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const price = _getConfirmedPrice(db, [], asset);
           res.json(price);
         });
         app.get('/unconfirmedPrice/:asset', (req, res, next) => {
           const {asset} = req.params;
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const price = _getUnconfirmedPrice(db, mempool, [], asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const price = _getUnconfirmedPrice(db, this.mempool, [], asset);
           res.json(price);
         });
         app.post('/submitMessage', bodyParserJson, (req, res, next) => {
@@ -2375,7 +2308,7 @@ class Crds {
       const _requestListenApi = server => {
         const connections = server[connectionsSymbol];
 
-        this.api.on('block', block => {
+        this.on('block', block => {
           const e = {
             type: 'block',
             block: block,
@@ -2389,7 +2322,7 @@ class Crds {
             }
           }
         });
-        this.api.on('message', message => {
+        this.on('message', message => {
           const e = {
             type: 'message',
             message: message,
@@ -2403,7 +2336,7 @@ class Crds {
             }
           }
         });
-        this.api.on('peer', peer => {
+        this.on('peer', peer => {
           const e = {
             type: 'peer',
             peer: peer,
@@ -2752,16 +2685,22 @@ class Crds {
 
             const error = _addBlock(this.dbs, this.blocks, this.mempool, block);
             if (!error) {
-              const difficulty = _getNextBlockBaseDifficulty(blocks);
+              const difficulty = _getNextBlockBaseDifficulty(this.blocks);
               const timeTaken = timeDiff / 1000;
               minedBlocks++;
-              console.log('mined block', difficulty, timeTaken);
+
+              // console.log('mined block', difficulty, timeTaken);
             } else {
               console.warn('add mined block error:', error);
             }
           }
 
           mineImmediate = setImmediate(_mine);
+        })
+        .catch(err => {
+          console.warn(err.stack);
+
+          setTimeout(_mine, 1000);
         });
     };
     const _startMine = address => {
@@ -2785,6 +2724,8 @@ class Crds {
       .then(() => _listen())
       .then(server => {
         return cb => {
+          _stopMine();
+
           server.close(cb);
         };
       });
@@ -3279,6 +3220,71 @@ const _getPostMessagesPrices = (prices, asset, messages) => prices
       .filter(payloadJson => payloadJson.type === 'price' && payloadJson.asset === asset)
       .map(({price}) => price)
   );
+const _getNextBlockMinTimestamp = blocks => {
+  const checkBlocks = blocks.slice(-TARGET_BLOCKS);
+  const sortedCheckBlocks = checkBlocks.slice()
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const medianTimestamp = (() => {
+    if (sortedCheckBlocks.length > 0) {
+      const middleIndex = Math.floor((sortedCheckBlocks.length - 1) / 2);
+
+      if (sortedCheckBlocks.length % 2) {
+          return sortedCheckBlocks[middleIndex].timestamp;
+      } else {
+          return (sortedCheckBlocks[middleIndex].timestamp + sortedCheckBlocks[middleIndex + 1].timestamp) / 2;
+      }
+    } else {
+      return 0;
+    }
+  })();
+  return medianTimestamp;
+};
+const _getNextBlockBaseDifficulty = blocks => {
+  const checkBlocks = blocks.slice(-TARGET_BLOCKS);
+  const checkBlocksTimeDiff = (() => {
+    if (checkBlocks.length > 0) {
+      let firstCheckBlock = null;
+      let lastCheckBlock = null;
+      for (let i = 0; i < checkBlocks.length; i++) {
+        const checkBlock = checkBlocks[i];
+
+        if (firstCheckBlock === null || checkBlock.timestamp < firstCheckBlock.timestamp) {
+          firstCheckBlock = checkBlock;
+        }
+        if (lastCheckBlock === null || checkBlock.timestamp > lastCheckBlock.timestamp) {
+          lastCheckBlock = checkBlock;
+        }
+      }
+      return lastCheckBlock.timestamp - firstCheckBlock.timestamp;
+    } else {
+      return 0;
+    }
+  })();
+  const expectedTimeDiff = TARGET_TIME;
+  const averageDifficulty = (() => {
+    if (checkBlocks.length > 0) {
+      let acc = 0;
+      for (let i = 0; i < checkBlocks.length; i++) {
+        const checkBlock = checkBlocks[i];
+        acc += checkBlock.difficulty;
+      }
+      return acc / checkBlocks.length;
+    } else {
+      return 0;
+    }
+  })();
+  const accuracyFactor = Math.max(Math.min(checkBlocksTimeDiff / expectedTimeDiff, TARGET_SWAY_MAX), TARGET_SWAY_MIN);
+  const newDifficulty = Math.max(averageDifficulty / accuracyFactor, MIN_DIFFICULTY);
+  return newDifficulty;
+};
+const _getMessagesDifficulty = messages => {
+  let result = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    result += _getHashDifficulty(message.hash);
+  }
+  return result;
+};
 
 const crds = opts => new Crds(opts);
 module.exports = crds;
