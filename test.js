@@ -127,7 +127,7 @@ const _resJson = res => {
   }
 };
 
-const _boot = () => {
+const _boot = (startport = 6777) => {
   const cleanups = [];
 
   return Promise.all([
@@ -650,6 +650,63 @@ describe('balances', () => {
             expect(balances['ITEM:mint']).toBe(undefined);
             expect(balances['ITEM']).toBe(2);
           }),
+      ]));
+  });
+});
+
+// peers
+
+describe('peers', () => {
+  let b1;
+  let b2;
+  beforeEach(() => {
+    return _boot()
+      .then(b => {
+        b1 = b;
+
+        return _boot(b1.port + 1)
+          .then(b => {
+            b2 = b;
+          });
+      });
+  });
+  afterEach(() => Promise.all([
+    b1.cleanup(),
+    b2.cleanup(),
+  ]));
+
+  it('should sync blocks', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b1.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b1.host}:${b1.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ])
+      .then(() => fetch(`http://${b1.host}:${b1.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: null}),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          b2.c.once('block', block => {
+            accept(block);
+          });
+        }),
+        fetch(`http://${b2.host}:${b2.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+        })
+          .then(_resJson),
       ]));
   });
 });

@@ -692,7 +692,7 @@ class Peer {
     return this._enabled;
   }
 
-  enable() {
+  enable(c) {
     this._enabled = true;
 
     const _listen = () => {
@@ -707,7 +707,7 @@ class Peer {
               case 'block': {
                 const {block: blockJson} = m;
                 const block = Block.from(blockJson);
-                const error = _addBlock(this.dbs, this.blocks, this.mempool, block);
+                const error = c.addBlock(block);
                 if (error && !error.soft) {
                   console.warn('add remote block error:', error);
                 }
@@ -818,7 +818,7 @@ class Peer {
           });
         });
 
-        const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
+        const topBlockHeight = (c.blocks.length > 0) ? c.blocks[c.blocks.length - 1].height : 0;
         Promise.all([
           _requestBlocks({
             startHeight: Math.max(topBlockHeight - CHARGE_SETTLE_BLOCKS, 1),
@@ -834,7 +834,7 @@ class Peer {
             const _addBlocks = () => {
               for (let i = 0; i < remoteBlocks.length; i++) {
                 const remoteBlock = Block.from(remoteBlocks[i]);
-                const error = _addBlock(this.dbs, this.blocks, this.mempool, remoteBlock);
+                const error = c.addBlock(remoteBlock);
                 if (error && !error.soft) {
                   console.warn('add remote block error:', error);
                 }
@@ -845,7 +845,7 @@ class Peer {
 
               for (let i = 0; i < remoteBlocks.length; i++) {
                 const remoteBlock = Block.from(remoteBlocks[i]);
-                const error = _addBlock(this.dbs, this.blocks, this.mempool, remoteBlock);
+                const error = c.addBlock(remoteBlock);
                 if (error && !error.soft) {
                   console.warn('add remote block error:', error);
                 }
@@ -870,7 +870,7 @@ class Peer {
             _addPeers();
           })
           .catch(err => {
-            // console.warn(err);
+            console.warn(err);
           });
       };
 
@@ -918,6 +918,8 @@ class Crds extends EventEmitter {
     this.blocks = [];
     this.mempool = _clone(DEFAULT_MEMPOOL);
     this.peers = [];
+
+    this.saveState = this.saveState();
   }
 
   submitMessage(message) {
@@ -947,16 +949,8 @@ class Crds extends EventEmitter {
     }
   }
 
-  listen({
-    host = DEFAULTS.host,
-    port = DEFAULTS.port,
-  } = {}) {
-    const {dataDirectory, cli} = this;
-
-    const localUrl = `http://${host}:${port}`;
-    let live = true;
-
-    const _checkBlockExists = (blocks, mempool, block) => {
+  addBlock(block) {
+   const _checkBlockExists = (blocks, mempool, block) => {
       const checkBlockIndex = block.height - 1;
       const topBlockHeight = (blocks.length > 0) ? blocks[blocks.length - 1].height : 0;
       const topBlockIndex = topBlockHeight - 1;
@@ -1074,7 +1068,6 @@ class Crds extends EventEmitter {
 
       return forkedBlock;
     };
-
     const _commitMainChainBlock = (db, blocks, mempool, block) => {
       const newDb = _clone(db);
 
@@ -1375,104 +1368,404 @@ class Crds extends EventEmitter {
         newMemPool,
       };
     };
-    const _addBlock = (dbs, blocks, mempool, block) => {
-      if (!_checkBlockExists(blocks, mempool, block)) {
-        const attachPoint = _findBlockAttachPoint(blocks, mempool, block);
 
-        if (attachPoint !== null) {
-          const {type} = attachPoint;
+    if (!_checkBlockExists(this.blocks, this.mempool, block)) {
+      const attachPoint = _findBlockAttachPoint(this.blocks, this.mempool, block);
 
-          if (type === 'mainChain') {
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const error = block.verify(db, blocks);
-            if (!error) {
-              const {newDb, newMempool} = _commitMainChainBlock(db, blocks, mempool, block);
-              dbs.push(newDb);
-              while (dbs.length > UNDO_HEIGHT) {
-                dbs.shift();
-              }
-              blocks.push(block);
-              while (block.length > CHARGE_SETTLE_BLOCKS) {
-                block.shift();
-              }
-              mempool.blocks = newMempool.blocks;
-              mempool.messages = newMempool.messages;
+      if (attachPoint !== null) {
+        const {type} = attachPoint;
 
-              _saveState();
-
-              this.emit('block', block);
-
-              return null;
-            } else {
-              return error;
+        if (type === 'mainChain') {
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const error = block.verify(db, this.blocks);
+          if (!error) {
+            const {newDb, newMempool} = _commitMainChainBlock(db, this.blocks, this.mempool, block);
+            this.dbs.push(newDb);
+            while (this.dbs.length > UNDO_HEIGHT) {
+              this.dbs.shift();
             }
-          } else if (type === 'sideChain') {
-            const {forkedBlock, sideChainBlocks} = attachPoint;
-
-            const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-            const error = block.verify(db, sideChainBlocks);
-            if (!error) {
-              const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(this.dbs, this.blocks, this.mempool, block, forkedBlock, sideChainBlocks);
-              this.dbs = newDbs;
-              while (dbs.length > UNDO_HEIGHT) {
-                dbs.shift();
-              }
-              this.blocks = newBlocks;
-              while (block.length > CHARGE_SETTLE_BLOCKS) {
-                block.shift();
-              }
-              mempool.blocks = newMempool.blocks;
-              mempool.messages = newMempool.messages;
-
-              _saveState();
-
-              this.emit('block', block);
-
-              return null;
-            } else {
-              return error;
+            this.blocks.push(block);
+            while (this.blocks.length > CHARGE_SETTLE_BLOCKS) {
+              this.blocks.shift();
             }
-          } else if (type === 'outOfRange') {
-            const {direction} = attachPoint;
+            this.mempool.blocks = newMempool.blocks;
+            this.mempool.messages = newMempool.messages;
 
-            if (direction === -1) {
-              return {
-                status: 400,
-                error: 'stale block',
-                soft: true,
-              };
-            } else {
-              return {
-                status: 400,
-                error: 'desynchronized block',
-                soft: true,
-              };
+            this.saveState();
+
+            this.emit('block', block);
+
+            return null;
+          } else {
+            return error;
+          }
+        } else if (type === 'sideChain') {
+          const {forkedBlock, sideChainBlocks} = attachPoint;
+
+          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const error = block.verify(db, sideChainBlocks);
+          if (!error) {
+            const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(this.dbs, this.blocks, this.mempool, block, forkedBlock, sideChainBlocks);
+            this.dbs = newDbs;
+            while (this.dbs.length > UNDO_HEIGHT) {
+              this.dbs.shift();
             }
-          } else if (type === 'dangling') {
+            this.blocks = newBlocks;
+            while (this.blocks.length > CHARGE_SETTLE_BLOCKS) {
+              this.blocks.shift();
+            }
+            this.mempool.blocks = newMempool.blocks;
+            this.mempool.messages = newMempool.messages;
+
+            this.saveState();
+
+            this.emit('block', block);
+
+            return null;
+          } else {
+            return error;
+          }
+        } else if (type === 'outOfRange') {
+          const {direction} = attachPoint;
+
+          if (direction === -1) {
             return {
               status: 400,
-              error: 'dangling block',
+              error: 'stale block',
+              soft: true,
             };
           } else {
             return {
               status: 400,
-              error: 'internal block attach error',
+              error: 'desynchronized block',
+              soft: true,
             };
           }
+        } else if (type === 'dangling') {
+          return {
+            status: 400,
+            error: 'dangling block',
+          };
         } else {
           return {
             status: 400,
-            error: 'invalid block',
+            error: 'internal block attach error',
           };
         }
       } else {
         return {
           status: 400,
-          error: 'block exists',
-          soft: true,
+          error: 'invalid block',
         };
       }
+    } else {
+      return {
+        status: 400,
+        error: 'block exists',
+        soft: true,
+      };
+    }
+  }
+
+  loadState() {
+    const {dataDirectory} = this;
+    const dbDataPath = path.join(dataDirectory, 'db');
+    const blocksDataPath = path.join(dataDirectory, 'blocks');
+
+    const _readdirDbs = () => new Promise((accept, reject) => {
+      fs.readdir(dbDataPath, (err, files) => {
+        if (!err || err.code === 'ENOENT') {
+          files = files || [];
+
+          accept(files);
+        } else {
+          reject(err);
+        }
+      });
+    });
+    const _readdirBlocks = () => new Promise((accept, reject) => {
+      fs.readdir(blocksDataPath, (err, files) => {
+        if (!err || err.code === 'ENOENT') {
+          files = files || [];
+
+          accept(files);
+        } else {
+          reject(err);
+        }
+      });
+    });
+    const _decorateBlocks = blocks => {
+      for (let i = 0; i < blocks.length; i++) {
+        blocks[i] = Block.from(blocks[i]);
+      }
     };
+
+    return Promise.all([
+      _readdirDbs(),
+      _readdirBlocks(),
+    ])
+      .then(([
+        dbFiles,
+        blockFiles,
+      ]) => {
+        const bestBlockHeight = (() => {
+          const blockHeightIndex = {};
+          for (let i = 0; i < blockFiles.length; i++) {
+            const blockFile = blockFiles[i];
+            const match = blockFile.match(/^block-([0-9]+)\.json$/);
+
+            if (match) {
+              const height = match[1];
+              blockHeightIndex[height] = true;
+            }
+          }
+
+          for (let height = 1; height <= blockFiles.length; height++) {
+            if (!blockHeightIndex[height]) {
+              return height - 1;
+            }
+          }
+          return blockFiles.length;
+        })();
+
+        if (bestBlockHeight > 0) { // load dbs and blocks from disk
+          const _readDbFiles = () => {
+            const candidateHeights = (() => {
+              const result = [];
+
+              const _haveDbFile = height => dbFiles.some(file => {
+                const match = file.match(/^db-([0-9]+)\.json$/);
+                return Boolean(match) && parseInt(match[1], 10) === height;
+              });
+              for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
+                result.unshift(i);
+              }
+              return result;
+            })();
+            const _readDbFile = height => new Promise((accept, reject) => {
+              fs.readFile(path.join(dbDataPath, `db-${height}.json`), 'utf8', (err, s) => {
+                if (!err) {
+                  const db = JSON.parse(s);
+                  accept(db);
+                } else {
+                  reject(err);
+                }
+              });
+            });
+            return Promise.all(candidateHeights.map(height => _readDbFile(height)));
+          };
+          const _readBlockFiles = () => {
+            const candidateHeights = (() => {
+              const result = [];
+              for (let i = Math.max(bestBlockHeight - CHARGE_SETTLE_BLOCKS, 1); i <= bestBlockHeight; i++) {
+                result.push(i);
+              }
+              return result;
+            })();
+            const _readBlockFile = height => new Promise((accept, reject) => {
+              fs.readFile(path.join(blocksDataPath, `block-${height}.json`), 'utf8', (err, s) => {
+                if (!err) {
+                  const block = JSON.parse(s);
+                  accept(block);
+                } else {
+                  reject(err);
+                }
+              });
+            });
+            return Promise.all(candidateHeights.map(height => _readBlockFile(height)));
+          };
+
+          return Promise.all([
+            _readDbFiles(),
+            _readBlockFiles(),
+          ])
+            .then(([
+              newDbs,
+              newBlocks,
+            ]) => {
+              // NOTE: we are assuming no file corruption
+              this.dbs = newDbs;
+              this.blocks = newBlocks;
+              _decorateBlocks(this.blocks);
+            });
+        } else { // nothing to salvage; bootstrap db and do a full sync
+          this.dbs = [];
+          this.blocks = [];
+          _decorateBlocks(this.blocks);
+
+          return Promise.resolve();
+        }
+      });
+  }
+
+  saveState() {
+    const {dataDirectory} = this;
+    const dbDataPath = path.join(dataDirectory, 'db');
+    const blocksDataPath = path.join(dataDirectory, 'blocks');
+
+    const _doSave = cb => {
+      const _writeNewFiles = () => {
+        const promises = [];
+        const _writeFile = (p, d) => new Promise((accept, reject) => {
+          writeFileAtomic(p, d, err => {
+            if (!err || err.code === 'ENOENT') {
+              accept();
+            } else {
+              reject(err);
+            }
+          });
+        });
+        const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
+        for (let i = 0; i < this.blocks.length; i++) {
+          const block = this.blocks[i];
+          const {height} = block;
+          promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
+
+          if (i >= zerothDbLocalBlockIndex) {
+            const dbIndex = i - zerothDbLocalBlockIndex;
+            const db = this.dbs[dbIndex];
+            promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
+          }
+        }
+
+        return Promise.all(promises);
+      };
+      const _removeOldFiles = () => {
+        const _removeDbFiles = () => new Promise((accept, reject) => {
+          fs.readdir(dbDataPath, (err, dbFiles) => {
+            if (!err || err.code === 'ENOENT') {
+              dbFiles = dbFiles || [];
+
+              const keepDbFiles = [];
+              const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
+              for (let i = zerothDbLocalBlockIndex; i < this.blocks.length; i++) {
+                const block = this.blocks[i];
+                const {height} = block;
+                keepDbFiles.push(`db-${height}.json`);
+              }
+
+              const promises = [];
+              const _removeFile = p => new Promise((accept, reject) => {
+                fs.unlink(p, err => {
+                  if (!err || err.code === 'ENOENT') {
+                    accept();
+                  } else {
+                    reject(err);
+                  }
+                });
+              });
+              for (let i = 0; i < dbFiles.length; i++) {
+                const dbFile = dbFiles[i];
+
+                if (!keepDbFiles.includes(dbFile)) {
+                  promises.push(_removeFile(path.join(dbDataPath, dbFile)));
+                }
+              }
+
+              Promise.all(promises)
+                .then(accept)
+                .catch(reject);
+            } else {
+              reject(err);
+            }
+          });
+        });
+        const _removeBlockFiles = () => new Promise((accept, reject) => {
+          fs.readdir(blocksDataPath, (err, blockFiles) => {
+            if (!err || err.code === 'ENOENT') {
+              blockFiles = blockFiles || [];
+
+              const promises = [];
+              const _removeFile = p => new Promise((accept, reject) => {
+                fs.unlink(p, err => {
+                  if (!err || err.code === 'ENOENT') {
+                    accept();
+                  } else {
+                    reject(err);
+                  }
+                });
+              });
+              const topBlockHeight = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
+              for (let i = 0; i < blockFiles.length; i++) {
+                const blockFile = blockFiles[i];
+                const match = blockFile.match(/^block-([0-9]+)\.json$/);
+
+                const _remove = () => {
+                  promises.push(_removeFile(path.join(blocksDataPath, blockFile)));
+                };
+
+                if (match) {
+                  const height = parseInt(match[1], 10);
+
+                  if (height >= 1 && height <= topBlockHeight) {
+                    // nothing
+                  } else {
+                    _remove();
+                  } 
+                } else {
+                  _remove();
+                }
+              }
+
+              Promise.all(promises)
+                .then(accept)
+                .catch(reject);
+            } else {
+              reject(err);
+            }
+          });
+        });
+
+        return Promise.all([
+          _removeDbFiles(),
+          _removeBlockFiles(),
+        ]);
+      };
+
+      _writeNewFiles()
+        .then(() => _removeOldFiles())
+        .then(() => {
+          cb();
+        })
+        .catch(err => {
+          cb(err);
+        });
+    };
+
+    let running = false;
+    let queued = false;
+    const _recurse = () => {
+      if (!running) {
+        running = true;
+
+        _doSave(err => {
+          if (err) {
+            console.warn(err);
+          }
+
+          running = false;
+
+          if (queued) {
+            queued = false;
+
+            _recurse();
+          }
+        });
+      } else {
+        queued = true;
+      }
+    };
+    return _recurse;
+  }
+
+  listen({
+    host = DEFAULTS.host,
+    port = DEFAULTS.port,
+  } = {}) {
+    const {dataDirectory, cli} = this;
+
+    const localUrl = `http://${host}:${port}`;
+    let live = true;
 
     let lastBlockTime = Date.now();
     let numHashes = 0;
@@ -1553,133 +1846,6 @@ class Crds extends EventEmitter {
     const dbDataPath = path.join(dataDirectory, 'db');
     const blocksDataPath = path.join(dataDirectory, 'blocks');
     const peersDataPath = path.join(dataDirectory, 'peers.txt');
-    const fsDataPath = path.join(dataDirectory, 'fs');
-    const _decorateBlocks = blocks => {
-      for (let i = 0; i < blocks.length; i++) {
-        blocks[i] = Block.from(blocks[i]);
-      }
-    };
-    const _loadState = () => {
-      const _readdirDbs = () => new Promise((accept, reject) => {
-        fs.readdir(dbDataPath, (err, files) => {
-          if (!err || err.code === 'ENOENT') {
-            files = files || [];
-
-            accept(files);
-          } else {
-            reject(err);
-          }
-        });
-      });
-      const _readdirBlocks = () => new Promise((accept, reject) => {
-        fs.readdir(blocksDataPath, (err, files) => {
-          if (!err || err.code === 'ENOENT') {
-            files = files || [];
-
-            accept(files);
-          } else {
-            reject(err);
-          }
-        });
-      });
-
-      return Promise.all([
-        _readdirDbs(),
-        _readdirBlocks(),
-      ])
-        .then(([
-          dbFiles,
-          blockFiles,
-        ]) => {
-          const bestBlockHeight = (() => {
-            const blockHeightIndex = {};
-            for (let i = 0; i < blockFiles.length; i++) {
-              const blockFile = blockFiles[i];
-              const match = blockFile.match(/^block-([0-9]+)\.json$/);
-
-              if (match) {
-                const height = match[1];
-                blockHeightIndex[height] = true;
-              }
-            }
-
-            for (let height = 1; height <= blockFiles.length; height++) {
-              if (!blockHeightIndex[height]) {
-                return height - 1;
-              }
-            }
-            return blockFiles.length;
-          })();
-
-          if (bestBlockHeight > 0) { // load dbs and blocks from disk
-            const _readDbFiles = () => {
-              const candidateHeights = (() => {
-                const result = [];
-
-                const _haveDbFile = height => dbFiles.some(file => {
-                  const match = file.match(/^db-([0-9]+)\.json$/);
-                  return Boolean(match) && parseInt(match[1], 10) === height;
-                });
-                for (let i = bestBlockHeight; (i >= (bestBlockHeight - UNDO_HEIGHT)) && (i > 0) && _haveDbFile(i); i--) {
-                  result.unshift(i);
-                }
-                return result;
-              })();
-              const _readDbFile = height => new Promise((accept, reject) => {
-                fs.readFile(path.join(dbDataPath, `db-${height}.json`), 'utf8', (err, s) => {
-                  if (!err) {
-                    const db = JSON.parse(s);
-                    accept(db);
-                  } else {
-                    reject(err);
-                  }
-                });
-              });
-              return Promise.all(candidateHeights.map(height => _readDbFile(height)));
-            };
-            const _readBlockFiles = () => {
-              const candidateHeights = (() => {
-                const result = [];
-                for (let i = Math.max(bestBlockHeight - CHARGE_SETTLE_BLOCKS, 1); i <= bestBlockHeight; i++) {
-                  result.push(i);
-                }
-                return result;
-              })();
-              const _readBlockFile = height => new Promise((accept, reject) => {
-                fs.readFile(path.join(blocksDataPath, `block-${height}.json`), 'utf8', (err, s) => {
-                  if (!err) {
-                    const block = JSON.parse(s);
-                    accept(block);
-                  } else {
-                    reject(err);
-                  }
-                });
-              });
-              return Promise.all(candidateHeights.map(height => _readBlockFile(height)));
-            };
-
-            return Promise.all([
-              _readDbFiles(),
-              _readBlockFiles(),
-            ])
-              .then(([
-                newDbs,
-                newBlocks,
-              ]) => {
-                // NOTE: we are assuming no file corruption
-                this.dbs = newDbs;
-                this.blocks = newBlocks;
-                _decorateBlocks(this.blocks);
-              });
-          } else { // nothing to salvage; bootstrap db and do a full sync
-            this.dbs = [];
-            this.blocks = [];
-            _decorateBlocks(this.blocks);
-
-            return Promise.resolve();
-          }
-        });
-    };
     const _ensureDataPaths = () => {
       const dataDirectories = [
         dataDirectory,
@@ -1697,161 +1863,6 @@ class Crds extends EventEmitter {
       });
       return Promise.all(dataDirectories.map(p => _ensureDirectory(p)));
     };
-    const _saveState = (() => {
-      const _doSave = cb => {
-        const _writeNewFiles = () => {
-          const promises = [];
-          const _writeFile = (p, d) => new Promise((accept, reject) => {
-            writeFileAtomic(p, d, err => {
-              if (!err || err.code === 'ENOENT') {
-                accept();
-              } else {
-                reject(err);
-              }
-            });
-          });
-          const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
-          for (let i = 0; i < this.blocks.length; i++) {
-            const block = this.blocks[i];
-            const {height} = block;
-            promises.push(_writeFile(path.join(blocksDataPath, `block-${height}.json`), JSON.stringify(block, null, 2)));
-
-            if (i >= zerothDbLocalBlockIndex) {
-              const dbIndex = i - zerothDbLocalBlockIndex;
-              const db = this.dbs[dbIndex];
-              promises.push(_writeFile(path.join(dbDataPath, `db-${height}.json`), JSON.stringify(db, null, 2)));
-            }
-          }
-
-          return Promise.all(promises);
-        };
-        const _removeOldFiles = () => {
-          const _removeDbFiles = () => new Promise((accept, reject) => {
-            fs.readdir(dbDataPath, (err, dbFiles) => {
-              if (!err || err.code === 'ENOENT') {
-                dbFiles = dbFiles || [];
-
-                const keepDbFiles = [];
-                const zerothDbLocalBlockIndex = Math.max(this.blocks.length - UNDO_HEIGHT, 0);
-                for (let i = zerothDbLocalBlockIndex; i < this.blocks.length; i++) {
-                  const block = this.blocks[i];
-                  const {height} = block;
-                  keepDbFiles.push(`db-${height}.json`);
-                }
-
-                const promises = [];
-                const _removeFile = p => new Promise((accept, reject) => {
-                  fs.unlink(p, err => {
-                    if (!err || err.code === 'ENOENT') {
-                      accept();
-                    } else {
-                      reject(err);
-                    }
-                  });
-                });
-                for (let i = 0; i < dbFiles.length; i++) {
-                  const dbFile = dbFiles[i];
-
-                  if (!keepDbFiles.includes(dbFile)) {
-                    promises.push(_removeFile(path.join(dbDataPath, dbFile)));
-                  }
-                }
-
-                Promise.all(promises)
-                  .then(accept)
-                  .catch(reject);
-              } else {
-                reject(err);
-              }
-            });
-          });
-          const _removeBlockFiles = () => new Promise((accept, reject) => {
-            fs.readdir(blocksDataPath, (err, blockFiles) => {
-              if (!err || err.code === 'ENOENT') {
-                blockFiles = blockFiles || [];
-
-                const promises = [];
-                const _removeFile = p => new Promise((accept, reject) => {
-                  fs.unlink(p, err => {
-                    if (!err || err.code === 'ENOENT') {
-                      accept();
-                    } else {
-                      reject(err);
-                    }
-                  });
-                });
-                const topBlockHeight = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
-                for (let i = 0; i < blockFiles.length; i++) {
-                  const blockFile = blockFiles[i];
-                  const match = blockFile.match(/^block-([0-9]+)\.json$/);
-
-                  const _remove = () => {
-                    promises.push(_removeFile(path.join(blocksDataPath, blockFile)));
-                  };
-
-                  if (match) {
-                    const height = parseInt(match[1], 10);
-
-                    if (height >= 1 && height <= topBlockHeight) {
-                      // nothing
-                    } else {
-                      _remove();
-                    } 
-                  } else {
-                    _remove();
-                  }
-                }
-
-                Promise.all(promises)
-                  .then(accept)
-                  .catch(reject);
-              } else {
-                reject(err);
-              }
-            });
-          });
-
-          return Promise.all([
-            _removeDbFiles(),
-            _removeBlockFiles(),
-          ]);
-        };
-
-        _writeNewFiles()
-          .then(() => _removeOldFiles())
-          .then(() => {
-            cb();
-          })
-          .catch(err => {
-            cb(err);
-          });
-      };
-
-      let running = false;
-      let queued = false;
-      const _recurse = () => {
-        if (!running) {
-          running = true;
-
-          _doSave(err => {
-            if (err) {
-              console.warn(err);
-            }
-
-            running = false;
-
-            if (queued) {
-              queued = false;
-
-              _recurse();
-            }
-          });
-        } else {
-          queued = true;
-        }
-      };
-      return _recurse;
-    })();
     const _loadPeers = () => new Promise((accept, reject) => {
       fs.readFile(peersDataPath, 'utf8', (err, s) => {
         if (!err) {
@@ -1941,7 +1952,7 @@ class Crds extends EventEmitter {
         while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
           const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
           const peer = disabledPeers[disabledPeerIndex];
-          peer.enable();
+          peer.enable(this);
 
           disabledPeers.splice(disabledPeerIndex, 1);
           enabledPeers.push(peer);
@@ -2210,14 +2221,14 @@ class Crds extends EventEmitter {
           const height = parseInt(heightStirng, 10);
 
           if (!isNaN(height)) {
-            const topBlockHeight = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+            const topBlockHeight = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
 
             if (height >= 1 && height <= topBlockHeight) {
-              const firstBlockHeight = blocks[0].height;
+              const firstBlockHeight = this.blocks[0].height;
 
               if (height >= firstBlockHeight) {
                 const blockIndex = height - firstBlockHeight;
-                const block = blocks[blockIndex];
+                const block = this.blocks[blockIndex];
                 res.type('application/json');
                 res.send(JSON.stringify(block, null, 2));
               } else {
@@ -2245,7 +2256,7 @@ class Crds extends EventEmitter {
           }
         });
         /* app.get('/blockcount', (req, res, next) => {
-          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+          const blockcount = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
 
           res.json({
             blockcount,
@@ -2259,8 +2270,24 @@ class Crds extends EventEmitter {
         });
         app.get('/peers', (req, res, next) => {
           const urls = this.peers.map(({url}) => url);
-
           res.json(urls);
+        });
+        app.post('/peer', bodyParserJson, (req, res, next) => {
+          const {body} = req;
+
+          if (body && body.url && typeof body.url === 'string') {
+            const {url} = body;
+            _addPeer(url);
+
+            res.json({
+              ok: true,
+            });
+          } else {
+            res.status(400);
+            res.json({
+              error: 'invalid address',
+            });
+          }
         });
 
         const server = http.createServer(app)
@@ -2680,7 +2707,7 @@ class Crds extends EventEmitter {
             lastBlockTime = now;
             numHashes = 0;
 
-            const error = _addBlock(this.dbs, this.blocks, this.mempool, block);
+            const error = this.addBlock(block);
             if (!error) {
               const difficulty = _getNextBlockBaseDifficulty(this.blocks);
               const timeTaken = timeDiff / 1000;
@@ -2714,7 +2741,7 @@ class Crds extends EventEmitter {
     };
 
     return Promise.all([
-      _loadState(),
+      this.loadState(),
       _loadPeers(),
     ])
       .then(() => _ensureDataPaths())
@@ -2722,6 +2749,11 @@ class Crds extends EventEmitter {
       .then(server => {
         return cb => {
           _stopMine();
+
+          for (let i = 0; i < this.peers.length; i++) {
+            const peer = this.peers[i];
+            peer.disable();
+          }
 
           server.close(cb);
         };
