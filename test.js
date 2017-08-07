@@ -241,6 +241,34 @@ describe('mining', () => {
         .then(_resJson),
     ]);
   });
+
+  it('should have correct balance after mining', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ])
+    .then(() => Promise.all([
+      fetch(`http://${b.host}:${b.port}/balance/${address}/CRD`)
+        .then(_resJson)
+        .then(balance => {
+          expect(balance).toBe(100);
+        }),
+      fetch(`http://${b.host}:${b.port}/balances/${address}`)
+        .then(_resJson)
+        .then(balances => {
+          expect(balances['CRD']).toBe(100);
+        }),
+    ]))
+  });
 });
 
 // messages
@@ -563,6 +591,12 @@ describe('balances', () => {
       })
         .then(_resJson),
     ])
+      .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: null}),
+      }))
+      .then(_resJson)
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
@@ -572,13 +606,13 @@ describe('balances', () => {
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify(_makePriceMessage('ITEM', 20, privateKey)),
+        body: JSON.stringify(_makePriceMessage('ITEM', 40, privateKey)),
       }))
       .then(_resJson)
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify(_makeBuyMessage('ITEM', 2, 20, privateKey2)),
+        body: JSON.stringify(_makeBuyMessage('ITEM', 2, 40, privateKey2)),
       }))
       .then(_resJson)
       .then(() => Promise.all([
@@ -595,6 +629,7 @@ describe('balances', () => {
         fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
           .then(_resJson)
           .then(balances => {
+            expect(balances['CRD']).toBe(80);
             expect(balances['ITEM:mint']).toBe(1);
             expect(balances['ITEM']).toBe(undefined);
           }),
@@ -611,6 +646,7 @@ describe('balances', () => {
         fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address2}`)
           .then(_resJson)
           .then(balances => {
+            expect(balances['CRD'] % 100).toBe(20);
             expect(balances['ITEM:mint']).toBe(undefined);
             expect(balances['ITEM']).toBe(2);
           }),
