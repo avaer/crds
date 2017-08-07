@@ -1089,7 +1089,7 @@ class Crds extends EventEmitter {
           const {asset, quantity, address} = payloadJson;
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -1103,7 +1103,7 @@ class Crds extends EventEmitter {
           const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
           let srcAddressEntry = newDb.balances[srcAddress];
-          if (srcAddressEntry === undefined){
+          if (srcAddressEntry === undefined) {
             srcAddressEntry = {};
             newDb.balances[srcAddress] = srcAddressEntry;
           }
@@ -1115,7 +1115,7 @@ class Crds extends EventEmitter {
           srcAddressEntry[asset] = srcAssetEntry;
 
           let dstAddressEntry = newDb.balances[dstAddress];
-          if (dstAddressEntry === undefined){
+          if (dstAddressEntry === undefined) {
             dstAddressEntry = {};
             newDb.balances[dstAddress] = dstAddressEntry;
           }
@@ -1142,7 +1142,7 @@ class Crds extends EventEmitter {
           const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
           let srcAddressEntry = newDb.balances[srcAddress];
-          if (srcAddressEntry === undefined){
+          if (srcAddressEntry === undefined) {
             srcAddressEntry = {};
             newDb.balances[srcAddress] = srcAddressEntry;
           }
@@ -1154,7 +1154,7 @@ class Crds extends EventEmitter {
           srcAddressEntry[CRD] = srcAddressDstAssetEntry;
 
           let dstAddressEntry = newDb.balances[dstAddress];
-          if (dstAddressEntry === undefined){
+          if (dstAddressEntry === undefined) {
             dstAddressEntry = {};
             newDb.balances[dstAddress] = dstAddressEntry;
           }
@@ -1177,7 +1177,7 @@ class Crds extends EventEmitter {
           const address = _getAddressFromPublicKey(publicKeyBuffer);
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -1191,7 +1191,7 @@ class Crds extends EventEmitter {
           const {address, asset, quantity} = payloadJson
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -1207,7 +1207,7 @@ class Crds extends EventEmitter {
           const address = _getAddressFromPublicKey(publicKeyBuffer);
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -1226,7 +1226,7 @@ class Crds extends EventEmitter {
           const {address, asset, quantity} = payloadJson
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -1248,7 +1248,7 @@ class Crds extends EventEmitter {
           const address = _getAddressFromPublicKey(publicKeyBuffer);
 
           let addressEntry = newDb.balances[address];
-          if (addressEntry === undefined){
+          if (addressEntry === undefined) {
             addressEntry = {};
             newDb.balances[address] = addressEntry;
           }
@@ -2763,7 +2763,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const {asset, quantity, address} = payloadJson;
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
@@ -2776,7 +2776,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const {asset, quantity, srcAddress, dstAddress} = payloadJson;
 
       let srcAddressEntry = result[srcAddress];
-      if (srcAddressEntry === undefined){
+      if (srcAddressEntry === undefined) {
         srcAddressEntry = {};
         result[srcAddress] = srcAddressEntry;
       }
@@ -2787,7 +2787,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       srcAddressEntry[asset] = srcAssetEntry - quantity;
 
       let dstAddressEntry = result[dstAddress];
-      if (dstAddressEntry === undefined){
+      if (dstAddressEntry === undefined) {
         dstAddressEntry = {};
         result[dstAddress] = dstAddressEntry;
       }
@@ -2803,7 +2803,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const dstAddress = _getAddressFromPublicKey(publicKeyBuffer);
 
       let srcAddressEntry = result[srcAddress];
-      if (srcAddressEntry === undefined){
+      if (srcAddressEntry === undefined) {
         srcAddressEntry = {};
         result[srcAddress] = srcAddressEntry;
       }
@@ -2815,7 +2815,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       srcAddressEntry[CRD] = srcAddressDstAssetEntry;
 
       let dstAddressEntry = result[dstAddress];
-      if (dstAddressEntry === undefined){
+      if (dstAddressEntry === undefined) {
         dstAddressEntry = {};
         result[dstAddress] = dstAddressEntry;
       }
@@ -2838,7 +2838,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
@@ -2852,7 +2852,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const {address, asset, quantity} = payloadJson;
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
@@ -2868,7 +2868,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
@@ -2887,7 +2887,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const {address, asset, quantity} = payloadJson;
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
@@ -2909,7 +2909,7 @@ const _getAllUnconfirmedBalances = (db, mempool) => {
       const address = _getAddressFromPublicKey(publicKeyBuffer);
 
       let addressEntry = result[address];
-      if (addressEntry === undefined){
+      if (addressEntry === undefined) {
         addressEntry = {};
         result[address] = addressEntry;
       }
