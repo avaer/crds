@@ -1,4 +1,5 @@
 const crds = require('.');
+const expect = require('expect');
 const tmp = require('tmp');
 const getport = require('getport');
 const fetch = require('node-fetch');
@@ -16,6 +17,10 @@ const privateKey = new Buffer('MXNo7tDiY1soVtglOo7Va1HH06i6d6r7cizypViPPxs=', 'b
 const publicKey = new Buffer('BFIrtpnhr6PWm4jzBzMJjFphs4WZwGsaqSk2Y+4zDJa9aK/kJByIBleRWDdBM6TgwuQ0DirXCulpKmzlfI2ytUU=', 'base64');
 const address = 'EvfZY8ic4vz97A93MhuKkNi79i75AH1RtAeZcPN77NqC';
 
+const privateKey2 = 'LtD8mL4xPNV0NAoVzqNpXDIXpWt2Xb2Sg7zr/0LaStY=';
+const publicKey2 = 'BBWXfrjN5NL7Y+Ws8vj3n8qOUi8cu3vQhRYi7/Qj4gAiznJyqIhunTIbmJW7o3mnW2TerlGkunfZie95/VWVKWk=';
+const address2 = '4btZmuP1YpzsmCuz9n3k6K9bpqNptnSH29jjjcdu2yjp';
+
 const _getPublicKey = privateKey => Buffer.from(secp256k1.keyFromPrivate(privateKey).getPublic('arr'));
 const _sha256 = o => {
   if (typeof o === 'string') {
@@ -31,6 +36,40 @@ const _makeMinterMessage = (asset, privateKey) => {
   const payload = JSON.stringify({type: 'minter', asset, publicKey: publicKeyString, startHeight, timestamp});
   const payloadBuffer = new Buffer(payload, 'utf8');
   const payloadHash = _sha256(payloadBuffer);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
+const _makeMintMessage = (asset, quantity, privateKey) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const publicKey = _getPublicKey(privateKey);
+  const publicKeyString = publicKey.toString('base64');
+  const payload = JSON.stringify({type: 'mint', asset, quantity, publicKey: publicKeyString, startHeight, timestamp});
+  const payloadHash = _sha256(payload);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
+const _makeSendMessage = (asset, quantity, srcAddress, dstAddress, privateKey) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const publicKey = _getPublicKey(privateKey);
+  const publicKeyString = publicKey.toString('base64');
+  const payload = JSON.stringify({type: 'send', startHeight, asset, quantity, srcAddress, dstAddress, publicKey: publicKeyString, timestamp});
+  const payloadHash = _sha256(payload);
   const payloadHashString = payloadHash.toString('hex');
   const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
   const signatureString = signature.toString('base64');
@@ -114,26 +153,49 @@ const _boot = () => {
     });
 };
 
+describe('crds', function() {
+this.timeout(10 * 1000);
+
 // mining
 
 describe('mining', () => {
   let b;
-  before(() => {
+  beforeEach(() => {
     return _boot()
       .then(newB => {
         b = newB;
       });
   });
-  after(() => b.cleanup());
+  afterEach(() => b.cleanup());
 
   it('should mine a block', () => {
-    const message = _makeMinterMessage('ITEM', privateKey);
-
     return Promise.all([
       new Promise((accept, reject) => {
         b.c.once('block', block => {
           accept(block);
         });
+      }),
+      fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ]);
+  });
+
+  it('should mine multiple blocks', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        let numBlocks = 0;
+        const _block = block => {
+          if (++numBlocks >= 2) {
+            b.c.removeListener('block', _block);
+
+            accept(block);
+          }
+        };
+        b.c.on('block', _block);
       }),
       fetch(`http://${b.host}:${b.port}/mine`, {
         method: 'POST',
@@ -149,22 +211,57 @@ describe('mining', () => {
 
 describe('messages', () => {
   let b;
-  before(() => {
+  beforeEach(() => {
     return _boot()
       .then(newB => {
         b = newB;
       });
   });
-  after(() => b.cleanup());
+  afterEach(() => b.cleanup());
 
-  it('should add message', () => {
-    const message = _makeMinterMessage('ITEM', privateKey);
-
+  it('should minter', () => {
     return fetch(`http://${b.host}:${b.port}/submitMessage`, {
       method: 'POST',
       headers: jsonHeaders,
-      body: JSON.stringify(message),
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
     })
-      .then(_resJson);
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/mempool`))
+      .then(_resJson)
+      .then(mempool => {
+        expect(mempool.messages.length).toBe(1);
+        expect(JSON.parse(mempool.messages[0].payload).type).toBe('minter');
+      });
   });
+
+  it('should minter, mint, and send', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM', 100, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeSendMessage('ITEM', 2, address, address2, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/mempool`))
+      .then(_resJson)
+      .then(mempool => {
+        expect(mempool.messages.length).toBe(3);
+        expect(JSON.parse(mempool.messages[0].payload).type).toBe('minter');
+        expect(JSON.parse(mempool.messages[1].payload).type).toBe('mint');
+        expect(JSON.parse(mempool.messages[2].payload).type).toBe('send');
+      });
+  });
+});
+
 });
