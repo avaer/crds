@@ -353,7 +353,109 @@ describe('balances', () => {
             expect(balances['ITEM:mint']).toBe(undefined);
             expect(balances['ITEM.WOOD']).toBe(2);
           }),
+      ]));
+  });
+
+  it('should return confirmed balances', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeSendMessage('ITEM.WOOD', 2, address, address2, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/balance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/balances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM.WOOD']).toBe(undefined);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address2}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address2}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/balances/${address2}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM.WOOD']).toBe(undefined);
+          }),
       ]))
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          b.c.once('block', block => {
+            accept(block);
+          });
+        }),
+        fetch(`http://${b.host}:${b.port}/mine`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({address}),
+        })
+          .then(_resJson),
+      ]))
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/balance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(98);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(98);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address2}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address2}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(2);
+          }),
+        fetch(`http://${b.host}:${b.port}/balance/${address2}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM.WOOD']).toBe(2);
+          }),
+      ]));
   });
 });
 
