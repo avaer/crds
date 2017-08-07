@@ -244,13 +244,13 @@ describe('messages', () => {
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify(_makeMintMessage('ITEM', 100, privateKey)),
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
       }))
       .then(_resJson)
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify(_makeSendMessage('ITEM', 2, address, address2, privateKey)),
+        body: JSON.stringify(_makeSendMessage('ITEM.WOOD', 2, address, address2, privateKey)),
       }))
       .then(_resJson)
       .then(() => fetch(`http://${b.host}:${b.port}/mempool`))
@@ -273,7 +273,7 @@ describe('messages', () => {
       .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify(_makeMintMessage('ITEM', 100, privateKey2)),
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey2)),
       }))
       .then(_resJson)
       .then(() => {
@@ -286,6 +286,74 @@ describe('messages', () => {
           return Promise.reject(err);
         }
       });
+  });
+});
+
+// balances
+
+describe('balances', () => {
+  let b;
+  beforeEach(() => {
+    return _boot()
+      .then(newB => {
+        b = newB;
+      });
+  });
+  afterEach(() => b.cleanup());
+
+  it('should return unconfirmed balances', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeSendMessage('ITEM.WOOD', 2, address, address2, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(98);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(98);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address2}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address2}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(2);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address2}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM.WOOD']).toBe(2);
+          }),
+      ]))
   });
 });
 
