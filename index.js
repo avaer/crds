@@ -164,6 +164,7 @@ class Block {
       return {
         status: 400,
         error: 'invalid previous hash',
+        soft: true,
       };
     } else if (!_checkHeight()) {
       return {
@@ -1408,7 +1409,7 @@ class Crds extends EventEmitter {
         } else if (type === 'sideChain') {
           const {forkedBlock, sideChainBlocks} = attachPoint;
 
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           const error = block.verify(db, sideChainBlocks);
           if (!error) {
             const {newDbs, newBlocks, newMempool} = _commitSideChainBlock(this.dbs, this.blocks, this.mempool, block, forkedBlock, sideChainBlocks);
@@ -1451,6 +1452,7 @@ class Crds extends EventEmitter {
           return {
             status: 400,
             error: 'dangling block',
+            soft: true,
           };
         } else {
           return {

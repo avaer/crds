@@ -267,7 +267,7 @@ const _boot = (startport = 6777) => {
 };
 
 describe('crds', function() {
-this.timeout(10 * 1000);
+this.timeout(30 * 1000);
 
 // mining
 
@@ -971,7 +971,7 @@ describe('storage', () => {
 
 // peers
 
-describe('two peers', () => {
+describe('peers', () => {
   let b1;
   let b2;
   beforeEach(() => {
@@ -1218,6 +1218,94 @@ describe('three peers', () => {
             expect(balances['ITEM.WOOD']).toBe(100);
           }),
       ]));
+  });
+});
+
+describe('resync', () => {
+  let b1;
+  let b2;
+  beforeEach(() => {
+    return _boot()
+      .then(b => {
+        b1 = b;
+
+        return _boot(b1.port + 1)
+          .then(b => {
+            b2 = b;
+          });
+      });
+  });
+  afterEach(() => Promise.all([
+    b1.cleanup(),
+    b2.cleanup(),
+  ]));
+
+  it('should resync after desync', () => {
+    return Promise.all([
+      {
+        b: b1,
+        privateKey: privateKey,
+      },
+      {
+        b: b2,
+        privateKey: privateKey2,
+      },
+    ].map(({b, privateKey}) =>
+      fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+      })
+        .then(_resJson)
+        .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+        }))
+        .then(_resJson)
+        .then(() => Promise.all([
+          new Promise((accept, reject) => {
+            let numBlocks = 0;
+
+            const _block = block => {
+              if (++numBlocks >= 6) {
+                accept(block);
+
+                b.c.removeListener('block', _block);
+              }
+            };
+            b.c.on('block', _block);
+          }),
+          fetch(`http://${b.host}:${b.port}/mine`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({address}),
+          })
+            .then(_resJson),
+        ]))
+        .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({address: null}),
+        }))
+        .then(_resJson)
+    ))
+      .then(() => fetch(`http://${b2.host}:${b2.port}/peer`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+      }))
+      .then(_resJson)
+      .then(() => new Promise((accept, reject) => { // wait for nodes to sync
+        setTimeout(accept, 1000);
+      }))
+      .then(() => Promise.all([b1, b2].map(b =>
+        fetch(`http://${b2.host}:${b2.port}/blocks/${6}`)
+          .then(_resJson)
+      )))
+      .then(blocks => {
+        expect(blocks[0].hash).toBe(blocks[1].hash);
+      });
   });
 });
 
