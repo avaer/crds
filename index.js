@@ -852,7 +852,7 @@ class Peer {
               }
               for (let i = 0; i < remoteMessages.length; i++) {
                 const remoteMessage = Message.from(remoteMessages[i]);
-                const error = this.submitMessage(remoteMessage);
+                const error = c.submitMessage(remoteMessage);
                 if (error && !error.soft) {
                   console.warn('add remote message error:', error);
                 }
