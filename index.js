@@ -2496,21 +2496,21 @@ class Crds extends EventEmitter {
 
     const commands = {
       db: args => {
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
         console.log(JSON.stringify(db, null, 2));
         process.stdout.write('> ');
       },
       blockcount: args => {
-        const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
+        const blockcount = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
         console.log(JSON.stringify(blockcount, null, 2));
         process.stdout.write('> ');
       },
       blockcache: args => {
-        console.log(JSON.stringify(blocks, null, 2));
+        console.log(JSON.stringify(this.blocks, null, 2));
         process.stdout.write('> ');
       },
       mempool: args => {
-        console.log(JSON.stringify(mempool.messages, null, 2));
+        console.log(JSON.stringify(this.mempool.messages, null, 2));
         process.stdout.write('> ');
       },
       getaddress: args => {
@@ -2537,31 +2537,31 @@ class Crds extends EventEmitter {
         const [address, asset] = args;
 
         if (address && asset) {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balance = _getUnconfirmedBalance(db, mempool, [], address, asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const balance = _getUnconfirmedBalance(db, this.mempool, [], address, asset);
           console.log(JSON.stringify(balance, null, 2));
-          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          const blockcount = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${this.mempool.messages.length}`);
           process.stdout.write('> ')
         } else if (address) {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const balances = _getUnconfirmedBalances(db, mempool, [], address);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const balances = _getUnconfirmedBalances(db, this.mempool, [], address);
           console.log(JSON.stringify(balances, null, 2));
-          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          const blockcount = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${this.mempool.messages.length}`);
           process.stdout.write('> ');
         } else {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          console.log(JSON.stringify(_getAllUnconfirmedBalances(db, mempool), null, 2));
-          const blockcount = blocks.length > 0 ? blocks[blocks.length - 1].height : 0;
-          console.log(`Blocks: ${blockcount} Mempool: ${mempool.messages.length}`);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          console.log(JSON.stringify(_getAllUnconfirmedBalances(db, this.mempool), null, 2));
+          const blockcount = this.blocks.length > 0 ? this.blocks[this.blocks.length - 1].height : 0;
+          console.log(`Blocks: ${blockcount} Mempool: ${this.mempool.messages.length}`);
           process.stdout.write('> ');
         }
       },
       minter: args => {
         const [asset] = args;
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-        const minter = _getUnconfirmedMinter(db, mempool, [], asset);
+        const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+        const minter = _getUnconfirmedMinter(db, this.mempool, [], asset);
         console.log(JSON.stringify(minter, null, 2));
         process.stdout.write('> ');
       },
@@ -2569,12 +2569,12 @@ class Crds extends EventEmitter {
         const [asset] = args;
 
         if (asset) {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const minter = _getUnconfirmedMinter(db, mempool, [], asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const minter = _getUnconfirmedMinter(db, this.mempool, [], asset);
           console.log(JSON.stringify(minter, null, 2));
           process.stdout.write('> ');
         } else {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           console.log(JSON.stringify(db.minters, null, 2));
           process.stdout.write('> ');
         }
@@ -2582,7 +2582,7 @@ class Crds extends EventEmitter {
       send: args => {
         const [asset, quantityString, srcAddress, dstAddress, privateKey] = args;
         const quantityNumber = parseInt(quantityString, 10);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createSend({asset, quantity: quantityNumber, srcAddress, dstAddress, startHeight, timestamp, privateKey})
@@ -2596,7 +2596,7 @@ class Crds extends EventEmitter {
       },
       minter: args => {
         const [asset, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createMinter({asset, startHeight, timestamp, privateKey})
@@ -2610,7 +2610,7 @@ class Crds extends EventEmitter {
       },
       price: args => {
         const [asset, price, privateKey] = args;
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createPrice({asset, price, startHeight, timestamp, privateKey})
@@ -2626,21 +2626,21 @@ class Crds extends EventEmitter {
         const [asset] = args;
 
         if (asset) {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
-          const price = _getUnconfirmedPrice(db, mempool, [], asset);
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
+          const price = _getUnconfirmedPrice(db, this.mempool, [], asset);
           console.log(JSON.stringify(price, null, 2));
           process.stdout.write('> ');
         } else {
-          const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+          const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
           console.log(JSON.stringify(db.prices, null, 2));
           process.stdout.write('> ');
         }
       },
       buy: args => {
         const [asset, quantity, privateKey] = args;
-        const db = (dbs.length > 0) ? dbs[dbs.length - 1] : DEFAULT_DB;
+        const db = (this.dbs.length > 0) ? this.dbs[this.dbs.length - 1] : DEFAULT_DB;
         const price = _getConfirmedPrice(db, [], asset);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createBuy({asset, quantity, price, startHeight, timestamp, privateKey})
@@ -2655,7 +2655,7 @@ class Crds extends EventEmitter {
       mint: args => {
         const [asset, quantityString, privateKey] = args;
         const quantityNumber = parseInt(quantityString, 10);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createMint({asset, quantity: quantityNumber, startHeight, timestamp, privateKey})
@@ -2670,7 +2670,7 @@ class Crds extends EventEmitter {
       get: args => {
         const [address, asset, quantityString] = args;
         const quantityNumber = parseInt(quantityString, 10);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createGet({address, asset, quantity: quantityNumber, startHeight, timestamp})
@@ -2685,7 +2685,7 @@ class Crds extends EventEmitter {
       burn: args => {
         const [address, asset, quantityString] = args;
         const quantityNumber = parseInt(quantityString, 10);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createBurn({address, asset, quantity: quantityNumber, startHeight, timestamp})
@@ -2700,7 +2700,7 @@ class Crds extends EventEmitter {
       drop: args => {
         const [address, asset, quantityString] = args;
         const quantityNumber = parseInt(quantityString, 10);
-        const startHeight = ((blocks.length > 0) ? blocks[blocks.length - 1].height : 0) + 1;
+        const startHeight = ((this.blocks.length > 0) ? this.blocks[this.blocks.length - 1].height : 0) + 1;
         const timestamp = Date.now();
 
         _createDrop({address, asset, quantity: quantityNumber, startHeight, timestamp})
@@ -2732,8 +2732,8 @@ class Crds extends EventEmitter {
         process.stdout.write('> ');
       },
       peers: args => {
-        if (peers.length > 0) {
-          console.log(peers.map(({url}) => url).join('\n'));
+        if (this.peers.length > 0) {
+          console.log(this.peers.map(({url}) => url).join('\n'));
         }
         process.stdout.write('> ');
       },
