@@ -115,6 +115,23 @@ const _makeDropMessage = (address, asset, quantity) => {
   };
   return message;
 };
+const _makeBurnMessage = (asset, quantity, privateKey) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const publicKey = _getPublicKey(privateKey);
+  const publicKeyString = publicKey.toString('base64');
+  const payload = JSON.stringify({type: 'burn', asset, quantity, publicKey: publicKeyString, startHeight, timestamp});
+  const payloadHash = _sha256(payload);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
 const _makePriceMessage = (asset, price, privateKey) => {
   const startHeight = 0;
   const timestamp = 0;
@@ -656,6 +673,45 @@ describe('balances', () => {
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(1);
             expect(balances['ITEM.WOOD']).toBe(2);
+          }),
+      ]));
+  });
+
+  it('should burn asset', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 10, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeBurnMessage('ITEM.WOOD', 3, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(7);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(7);
           }),
       ]));
   });
