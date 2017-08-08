@@ -128,7 +128,7 @@ const _resJson = res => {
 };
 
 const _boot = (startport = 6777) => {
-  const cleanups = [];
+  let cleanupTmpdir = null;
 
   return Promise.all([
     Promise.resolve('127.0.0.1'),
@@ -146,7 +146,7 @@ const _boot = (startport = 6777) => {
         unsafeCleanup: true,
       }, (err, p, cleanup) => {
         if (!err) {
-          cleanups.push(cleanup);
+          cleanupTmpdir = cleanup;
 
           accept(p);
         } else {
@@ -160,32 +160,57 @@ const _boot = (startport = 6777) => {
       port,
       tmpdir,
     ]) => {
-      const c = crds({
-        dataDirectory: tmpdir,
-      });
-      return c.listen({
-        host,
-        port,
-      })
-      .then(destroy => {
-        cleanups.push(destroy);
+      let c = null;
+      let destroy = null;
 
-        return {
-          c,
+      const _start = () => {
+        c = crds({
+          dataDirectory: tmpdir,
+        });
+
+        return c.listen({
           host,
           port,
-          tmpdir,
-          cleanup: () => Promise.all(cleanups.map(cleanup => new Promise((accept, reject) => {
-            cleanup(err => {
-              if (!err) {
-                accept();
-              } else {
-                reject(err);
-              }
-            });
-          }))),
-        };
+        })
+          .then(d => {
+            destroy = d;
+          });
+      };
+      const _stop = () => new Promise((accept, reject) => {
+        destroy(err => {
+          if (!err) {
+            accept();
+          } else {
+            reject(err);
+          }
+        });
+
+        c = null;
+        destroy = null;
       });
+      const _cleanup = () => _stop()
+        .then(() => new Promise((accept, reject) => {
+          cleanupTmpdir(err => {
+            if (!err) {
+              accept();
+            } else {
+              reject(err);
+            }
+          });
+        }));
+
+      return _start()
+        .then(() => {
+          return {
+            c,
+            host,
+            port,
+            tmpdir,
+            start: _start,
+            stop: _stop,
+            cleanup: _cleanup,
+          };
+        });
     });
 };
 
@@ -649,6 +674,127 @@ describe('balances', () => {
             expect(balances['CRD'] % 100).toBe(20);
             expect(balances['ITEM:mint']).toBe(undefined);
             expect(balances['ITEM']).toBe(2);
+          }),
+      ]));
+  });
+});
+
+// storage
+
+describe('storage', () => {
+  let b;
+  beforeEach(() => {
+    return _boot()
+      .then(newB => {
+        b = newB;
+      });
+  });
+  afterEach(() => b.cleanup());
+
+  it('should remember confirmed messages', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 20, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          b.c.once('block', block => {
+            accept(block);
+          });
+        }),
+        fetch(`http://${b.host}:${b.port}/mine`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({address}),
+        })
+          .then(_resJson),
+      ]))
+      .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: null}),
+      }))
+      .then(_resJson)
+      .then(() => b.stop())
+      .then(() => b.start())
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/CRD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBeGreaterThanOrEqualTo(100);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(20);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['CRD']).toBeGreaterThanOrEqualTo(100);
+            expect(balances['ITEM.WOOD']).toBe(20);
+          }),
+      ]));
+  });
+
+  it('should forget unconfirmed messages', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ])
+      .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: null}),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 20, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => b.stop())
+      .then(() => b.start())
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/CRD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBeGreaterThanOrEqualTo(100);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(0);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['CRD']).toBeGreaterThanOrEqualTo(100);
+            expect(balances['ITEM.WOOD']).toBe(undefined);
           }),
       ]));
   });

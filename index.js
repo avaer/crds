@@ -919,6 +919,8 @@ class Crds extends EventEmitter {
     this.mempool = _clone(DEFAULT_MEMPOOL);
     this.peers = [];
 
+    this.saveRunning = false;
+    this.saveCbs = [];
     this.saveState = this.saveState();
   }
 
@@ -1732,23 +1734,26 @@ class Crds extends EventEmitter {
         });
     };
 
-    let running = false;
     let queued = false;
     const _recurse = () => {
-      if (!running) {
-        running = true;
+      if (!this.saveRunning) {
+        this.saveRunning = true;
 
         _doSave(err => {
           if (err) {
             console.warn(err);
           }
 
-          running = false;
+          this.saveRunning = false;
 
           if (queued) {
             queued = false;
 
             _recurse();
+          } else {
+            for (let i = 0; i < this.saveCbs.length; i++) {
+              this.saveCbs[i]();
+            }
           }
         });
       } else {
@@ -2755,7 +2760,30 @@ class Crds extends EventEmitter {
             peer.disable();
           }
 
-          server.close(cb);
+          Promise.all([
+            new Promise((accept, reject) => {
+              server.close(err => {
+                if (!err) {
+                  accept();
+                } else {
+                  reject(err);
+                }
+              });
+            }),
+            new Promise((accept, reject) => {
+              if (this.saveRunning) {
+                this.saveCbs.push(accept);
+              } else {
+                accept();
+              }
+            }),
+          ])
+            .then(() => {
+              cb();
+            })
+            .catch(err => {
+              cb(err);
+            });
         };
       });
   }
