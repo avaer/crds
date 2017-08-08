@@ -1240,7 +1240,77 @@ describe('resync', () => {
     b2.cleanup(),
   ]));
 
-  it('should resync after desync', () => {
+  it('should catch up', () => {
+    return Promise.all([
+      {
+        b: b1,
+        privateKey: privateKey,
+        totalNumBlocks: 1,
+      },
+      {
+        b: b2,
+        privateKey: privateKey2,
+        totalNumBlocks: 4,
+      },
+    ].map(({b, privateKey, totalNumBlocks}) =>
+      fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+      })
+        .then(_resJson)
+        .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+        }))
+        .then(_resJson)
+        .then(() => Promise.all([
+          new Promise((accept, reject) => {
+            let numBlocks = 0;
+
+            const _block = block => {
+              if (++numBlocks >= totalNumBlocks) {
+                accept(block);
+
+                b.c.removeListener('block', _block);
+              }
+            };
+            b.c.on('block', _block);
+          }),
+          fetch(`http://${b.host}:${b.port}/mine`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({address}),
+          })
+            .then(_resJson),
+        ]))
+        .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({address: null}),
+        }))
+        .then(_resJson)
+    ))
+      .then(() => fetch(`http://${b2.host}:${b2.port}/peer`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+      }))
+      .then(_resJson)
+      .then(() => new Promise((accept, reject) => { // wait for nodes to sync
+        setTimeout(accept, 1000);
+      }))
+      .then(() => Promise.all([b1, b2].map(b =>
+        fetch(`http://${b2.host}:${b2.port}/blocks/${4}`)
+          .then(_resJson)
+      )))
+      .then(blocks => {
+        expect(blocks[0].hash).toBe(blocks[1].hash);
+      });
+  });
+
+  it('should come to consensus', () => {
     return Promise.all([
       {
         b: b1,
