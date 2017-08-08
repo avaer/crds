@@ -697,9 +697,9 @@ class Peer {
 
     const _listen = () => {
       const _recurse = () => {
-        const c = new ws(this.url.replace(/^http/, 'ws') + '/listen');
-        c.on('open', () => {
-          c.on('message', s => {
+        const connection = new ws(this.url.replace(/^http/, 'ws') + '/listen');
+        connection.on('open', () => {
+          connection.on('message', s => {
             const m = JSON.parse(s);
             const {type} = m;
 
@@ -716,7 +716,7 @@ class Peer {
               case 'message': {
                 const {message: messgeJson} = m;
                 const message = Message.from(messgeJson);
-                const error = this.submitMessage(message);
+                const error = c.submitMessage(message);
                 if (error && !error.soft) {
                   console.warn('add remote message error:', error);
                 }
@@ -724,7 +724,7 @@ class Peer {
               }
               case 'peer': {
                 const {peer} = m;
-                _addPeer(peer);
+                c.addPeer(peer);
                 break;
               }
               default: {
@@ -733,7 +733,7 @@ class Peer {
               }
             }
           });
-          c.on('close', () => {
+          connection.on('close', () => {
             this._connection = null;
 
             if (this._enabled) {
@@ -741,7 +741,7 @@ class Peer {
             }
           });
         });
-        c.on('error', err => {
+        connection.on('error', err => {
           // console.warn(err);
 
           this._connection = null;
@@ -751,7 +751,7 @@ class Peer {
           }
         });
 
-        this._connection = c;
+        this._connection = connection;
       };
       const _retry = () => {
         this._reconnectTimeout = setTimeout(() => {
@@ -861,7 +861,7 @@ class Peer {
             const _addPeers = () => {
               for (let i = 0; i < remotePeers.length; i++) {
                 const url = remotePeers[i];
-                _addPeer(url);
+                c.addPeer(url);
               }
             };
 
@@ -919,9 +919,13 @@ class Crds extends EventEmitter {
     this.mempool = _clone(DEFAULT_MEMPOOL);
     this.peers = [];
 
-    this.saveRunning = false;
-    this.saveCbs = [];
+    this.saveStateRunning = false;
+    this.saveStateCbs = [];
     this.saveState = this.saveState();
+
+    this.savePeersRunning = false;
+    this.savePeersCbs = [];
+    this.savePeers = this.savePeers();
   }
 
   submitMessage(message) {
@@ -1736,23 +1740,23 @@ class Crds extends EventEmitter {
 
     let queued = false;
     const _recurse = () => {
-      if (!this.saveRunning) {
-        this.saveRunning = true;
+      if (!this.saveStateRunning) {
+        this.saveStateRunning = true;
 
         _doSave(err => {
           if (err) {
             console.warn(err);
           }
 
-          this.saveRunning = false;
+          this.saveStateRunning = false;
 
           if (queued) {
             queued = false;
 
             _recurse();
           } else {
-            for (let i = 0; i < this.saveCbs.length; i++) {
-              this.saveCbs[i]();
+            for (let i = 0; i < this.saveStateCbs.length; i++) {
+              this.saveStateCbs[i]();
             }
           }
         });
@@ -1763,14 +1767,122 @@ class Crds extends EventEmitter {
     return _recurse;
   }
 
+  loadPeers() {
+    const {dataDirectory} = this;
+    const peersDataPath = path.join(dataDirectory, 'peers.txt');
+
+    return new Promise((accept, reject) => {
+      fs.readFile(peersDataPath, 'utf8', (err, s) => {
+        if (!err) {
+          const newPeers = s.split('\n')
+            .filter(url => url)
+            .map(url => new Peer(url));
+          this.peers = newPeers;
+
+          accept();
+        } else if (err.code === 'ENOENT') {
+          this.peers = [];
+
+          accept();
+        } else {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  savePeers() {
+    const {dataDirectory} = this;
+    const peersDataPath = path.join(dataDirectory, 'peers.txt');
+
+    const _doSave = cb => {
+      const peersString = this.peers.map(({url}) => url).join('\n') + '\n';
+
+      fs.writeFile(peersDataPath, peersString, err => {
+        if (!err) {
+          cb();
+        } else {
+          cb(err);
+        }
+      });
+    };
+
+    let queued = false;
+    const _recurse = () => {
+      if (!this.savePeersRunning) {
+        this.savePeersRunning = true;
+
+        _doSave(err => {
+          if (err) {
+            console.warn(err);
+          }
+
+          this.savePeersRunning = false;
+
+          if (queued) {
+            queued = false;
+
+            _recurse();
+          } else {
+            for (let i = 0; i < this.savePeersCbs.length; i++) {
+              this.savePeersCbs[i]();
+            }
+          }
+        });
+      } else {
+        queued = true;
+      }
+    };
+    return _recurse;
+  }
+
+  addPeer(url) {
+    const {host, port} = this;
+
+    const peer = new Peer(url);
+    if (peer.url !== `http://${host}:${port}` && !this.peers.some(p => p.equals(peer))) {
+      this.peers.push(peer);
+
+      this.emit('peer', peer.url);
+
+      this.refreshLivePeers();
+
+      this.savePeers();
+    }
+  }
+
+  removePeer(url) {
+    const index = this.peers.findIndex(peer => peer.url === url);
+    if (index !== -1) {
+      const peer = this.peers[index];
+      peer.disable();
+      this.peers.splice(index, 1);
+
+      this.refreshLivePeers();
+
+      this.savePeers();
+    }
+  }
+
+  refreshLivePeers() {
+    const enabledPeers = this.peers.filter(peer => peer.isEnabled());
+    const disabledPeers = this.peers.filter(peer => !peer.isEnabled());
+
+    while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
+      const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
+      const peer = disabledPeers[disabledPeerIndex];
+      peer.enable(this);
+
+      disabledPeers.splice(disabledPeerIndex, 1);
+      enabledPeers.push(peer);
+    }
+  }
+
   listen({
     host = DEFAULTS.host,
     port = DEFAULTS.port,
   } = {}) {
     const {dataDirectory, cli} = this;
-
-    const localUrl = `http://${host}:${port}`;
-    let live = true;
 
     let lastBlockTime = Date.now();
     let numHashes = 0;
@@ -1850,7 +1962,6 @@ class Crds extends EventEmitter {
 
     const dbDataPath = path.join(dataDirectory, 'db');
     const blocksDataPath = path.join(dataDirectory, 'blocks');
-    const peersDataPath = path.join(dataDirectory, 'peers.txt');
     const _ensureDataPaths = () => {
       const dataDirectories = [
         dataDirectory,
@@ -1867,107 +1978,6 @@ class Crds extends EventEmitter {
         });
       });
       return Promise.all(dataDirectories.map(p => _ensureDirectory(p)));
-    };
-    const _loadPeers = () => new Promise((accept, reject) => {
-      fs.readFile(peersDataPath, 'utf8', (err, s) => {
-        if (!err) {
-          const newPeers = s.split('\n')
-            .filter(url => url)
-            .map(url => new Peer(url));
-          this.peers = newPeers;
-
-          accept();
-        } else if (err.code === 'ENOENT') {
-          this.peers = [];
-
-          accept();
-        } else {
-          reject(err);
-        }
-      });
-    });
-    const _savePeers = (() => {
-      const _doSave = cb => {
-        const peersString = this.peers.map(({url}) => url).join('\n') + '\n';
-
-        fs.writeFile(peersDataPath, peersString, err => {
-          if (!err) {
-            cb();
-          } else {
-            cb(err);
-          }
-        });
-      };
-
-      let running = false;
-      let queued = false;
-      const _recurse = () => {
-        if (!running) {
-          running = true;
-
-          _doSave(err => {
-            if (err) {
-              console.warn(err);
-            }
-
-            running = false;
-
-            if (queued) {
-              queued = false;
-
-              _recurse();
-            }
-          });
-        } else {
-          queued = true;
-        }
-      };
-      return _recurse;
-    })();
-
-    const _addPeer = url => {
-      const peer = new Peer(url);
-      if (peer.url !== localUrl && !this.peers.some(p => p.equals(peer))) {
-        this.peers.push(peer);
-
-        this.emit('peer', peer.url);
-
-        _refreshLivePeers();
-
-        _savePeers();
-      }
-    };
-    const _removePeer = url => {
-      const index = this.peers.findIndex(peer => peer.url === url);
-      if (index !== -1) {
-        const peer = this.peers[index];
-        peer.disable();
-        this.peers.splice(index, 1);
-
-        _refreshLivePeers();
-
-        _savePeers();
-      }
-    };
-    const _refreshLivePeers = () => {
-      const enabledPeers = this.peers.filter(peer => peer.isEnabled());
-      const disabledPeers = this.peers.filter(peer => !peer.isEnabled());
-
-      if (live) {
-        while (enabledPeers.length < MIN_NUM_LIVE_PEERS && disabledPeers.length > 0) {
-          const disabledPeerIndex = Math.floor(disabledPeers.length * Math.random());
-          const peer = disabledPeers[disabledPeerIndex];
-          peer.enable(this);
-
-          disabledPeers.splice(disabledPeerIndex, 1);
-          enabledPeers.push(peer);
-        }
-      } else {
-        while (enabledPeers.length > 0) {
-          const peer = enabledPeers.pop();
-          peer.disable();
-        }
-      }
     };
 
     const _listen = () => {
@@ -2282,7 +2292,7 @@ class Crds extends EventEmitter {
 
           if (body && body.url && typeof body.url === 'string') {
             const {url} = body;
-            _addPeer(url);
+            this.addPeer(url);
 
             res.json({
               ok: true,
@@ -2330,7 +2340,7 @@ class Crds extends EventEmitter {
         });
       });
       const _requestRefreshPeers = () => {
-        _refreshLivePeers();
+        this.refreshLivePeers();
 
         return Promise.resolve();
       };
@@ -2630,13 +2640,13 @@ class Crds extends EventEmitter {
             addpeer: args => {
               const [url] = args;
 
-              _addPeer(url);
+              this.addPeer(url);
               process.stdout.write('> ');
             },
             removepeer: args => {
               const [url] = args;
 
-              _removePeer(url);
+              this.removePeer(url);
               process.stdout.write('> ');
             },
             help: args => {
@@ -2674,11 +2684,14 @@ class Crds extends EventEmitter {
           });
           replHistory(r, path.join(dataDirectory, 'history.txt'));
           r.on('exit', () => {
-            live = false;
-
             server.close();
+
             _stopMine();
-            _refreshLivePeers();
+
+            for (let i = 0; i < this.peers.length; i++) {
+              const peer = this.peers[i];
+              peer.disable();
+            }
 
             process.on('SIGINT', () => {
               console.log('ignoring SIGINT');
@@ -2747,7 +2760,7 @@ class Crds extends EventEmitter {
 
     return Promise.all([
       this.loadState(),
-      _loadPeers(),
+      this.loadPeers(),
     ])
       .then(() => _ensureDataPaths())
       .then(() => _listen())
@@ -2771,8 +2784,8 @@ class Crds extends EventEmitter {
               });
             }),
             new Promise((accept, reject) => {
-              if (this.saveRunning) {
-                this.saveCbs.push(accept);
+              if (this.saveStateRunning) {
+                this.saveStateCbs.push(accept);
               } else {
                 accept();
               }

@@ -971,7 +971,7 @@ describe('storage', () => {
 
 // peers
 
-describe('peers', () => {
+describe('two peers', () => {
   let b1;
   let b2;
   beforeEach(() => {
@@ -1069,6 +1069,149 @@ describe('peers', () => {
             expect(balance).toBe(100);
           }),
         fetch(`http://${b2.host}:${b2.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(100);
+          }),
+      ]));
+  });
+});
+
+describe('three peers', () => {
+  let b1;
+  let b2;
+  let b3;
+  beforeEach(() => {
+    return _boot()
+      .then(b => {
+        b1 = b;
+
+        return _boot(b1.port + 1)
+          .then(b => {
+            b2 = b;
+          })
+          .then(() => {
+            return _boot(b2.port + 1)
+              .then(b => {
+                b3 = b;
+              });
+          });
+      });
+  });
+  afterEach(() => Promise.all([
+    b1.cleanup(),
+    b2.cleanup(),
+    b3.cleanup(),
+  ]));
+
+  it('should sync blocks three ways', () => {
+    return Promise.all([
+      new Promise((accept, reject) => {
+        b1.c.once('block', block => {
+          accept(block);
+        });
+      }),
+      fetch(`http://${b1.host}:${b1.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address}),
+      })
+        .then(_resJson),
+    ])
+      .then(() => fetch(`http://${b1.host}:${b1.port}/mine`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({address: null}),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          b2.c.once('block', block => {
+            accept(block);
+          });
+        }),
+        fetch(`http://${b2.host}:${b2.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+        })
+          .then(_resJson),
+        new Promise((accept, reject) => {
+          b3.c.once('block', block => {
+            accept(block);
+          });
+        }),
+        fetch(`http://${b3.host}:${b3.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b2.host}:${b2.port}`}),
+        })
+          .then(_resJson),
+      ]));
+  });
+
+  it('should sync mempool three ways', () => {
+    return fetch(`http://${b1.host}:${b1.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b1.host}:${b1.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          let numMessages = 0;
+          const _message = message => {
+            if (++numMessages >= 2) {
+              b2.c.removeListener('message', _message);
+
+              accept(message);
+            }
+          };
+          b2.c.on('message', _message);
+        }),
+        fetch(`http://${b2.host}:${b2.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+        })
+          .then(_resJson),
+        new Promise((accept, reject) => {
+          let numMessages = 0;
+          const _message = message => {
+            if (++numMessages >= 2) {
+              b3.c.removeListener('message', _message);
+
+              accept(message);
+            }
+          };
+          b3.c.on('message', _message);
+        }),
+        fetch(`http://${b3.host}:${b3.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b2.host}:${b2.port}`}),
+        })
+          .then(_resJson),
+      ]))
+      .then(() => Promise.all([
+        fetch(`http://${b3.host}:${b3.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b3.host}:${b3.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(100);
+          }),
+        fetch(`http://${b3.host}:${b3.port}/unconfirmedBalances/${address}`)
           .then(_resJson)
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(1);
