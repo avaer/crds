@@ -855,6 +855,58 @@ describe('peers', () => {
           .then(_resJson),
       ]));
   });
+
+  it.only('should sync mempool', () => {
+    return fetch(`http://${b1.host}:${b1.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b1.host}:${b1.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeMintMessage('ITEM.WOOD', 100, privateKey)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        new Promise((accept, reject) => {
+          let numMessages = 0;
+          const _message = message => {
+            if (++numMessages >= 2) {
+              b2.c.removeListener('message', _message);
+
+              accept(message);
+            }
+          };
+          b2.c.on('message', _message);
+        }),
+        fetch(`http://${b2.host}:${b2.port}/peer`, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({url: `http://${b1.host}:${b1.port}`}),
+        })
+          .then(_resJson),
+      ]))
+      .then(() => Promise.all([
+        fetch(`http://${b2.host}:${b2.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b2.host}:${b2.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(100);
+          }),
+        fetch(`http://${b2.host}:${b2.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(100);
+          }),
+      ]));
+  });
 });
 
 });
