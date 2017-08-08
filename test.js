@@ -1369,12 +1369,21 @@ describe('resync', () => {
       .then(() => new Promise((accept, reject) => { // wait for nodes to sync
         setTimeout(accept, 1000);
       }))
-      .then(() => Promise.all([b1, b2].map(b =>
-        fetch(`http://${b2.host}:${b2.port}/blocks/${6}`)
-          .then(_resJson)
-      )))
-      .then(blocks => {
-        expect(blocks[0].hash).toBe(blocks[1].hash);
+      .then(() => Promise.all(
+        [1, 2, 3, 4, 5, 6].map(n =>
+          Promise.all(
+            [b1, b2].map(b =>
+              fetch(`http://${b2.host}:${b2.port}/blocks/${n}`)
+                .then(_resJson)
+            )
+          )
+        )
+      ))
+      .then(ns => {
+        for (let i = 0; i < ns.length; i++) {
+          const blocks = ns[i];
+          expect(blocks[0].hash).toBe(blocks[1].hash);
+        }
       });
   });
 });
