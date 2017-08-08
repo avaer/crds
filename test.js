@@ -7,6 +7,11 @@ const {Headers} = fetch;
 const fastSha256 = require('fast-sha256');
 const secp256k1 = require('eccrypto-sync/secp256k1');
 
+const NULL_PRIVATE_KEY = (() => {
+  const result = new Uint8Array(32);
+  result[0] = 0xFF;
+  return result;
+})();
 const jsonHeaders = (() => {
   const headers = new Headers();
   headers.append('Content-Type', 'application/json');
@@ -72,6 +77,36 @@ const _makeSendMessage = (asset, quantity, srcAddress, dstAddress, privateKey) =
   const payloadHash = _sha256(payload);
   const payloadHashString = payloadHash.toString('hex');
   const signature = Buffer.from(secp256k1.sign(payloadHash, privateKey).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
+const _makeGetMessage = (address, asset, quantity) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const payload = JSON.stringify({type: 'get', address, asset, quantity, startHeight, timestamp});
+  const payloadHash = _sha256(payload);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, NULL_PRIVATE_KEY).toDER());
+  const signatureString = signature.toString('base64');
+  const message = {
+    payload: payload,
+    hash: payloadHashString,
+    signature: signatureString,
+  };
+  return message;
+};
+const _makeDropMessage = (address, asset, quantity) => {
+  const startHeight = 0;
+  const timestamp = 0;
+  const payload = JSON.stringify({type: 'drop', address, asset, quantity, startHeight, timestamp});
+  const payloadHash = _sha256(payload);
+  const payloadHashString = payloadHash.toString('hex');
+  const signature = Buffer.from(secp256k1.sign(payloadHash, NULL_PRIVATE_KEY).toDER());
   const signatureString = signature.toString('base64');
   const message = {
     payload: payload,
@@ -281,16 +316,22 @@ describe('mining', () => {
       })
         .then(_resJson),
     ])
+    .then(() => fetch(`http://${b.host}:${b.port}/mine`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({address: null}),
+    }))
+    .then(_resJson)
     .then(() => Promise.all([
       fetch(`http://${b.host}:${b.port}/balance/${address}/CRD`)
         .then(_resJson)
         .then(balance => {
-          expect(balance).toBe(100);
+          expect(balance).toBeGreaterThanOrEqualTo(100);
         }),
       fetch(`http://${b.host}:${b.port}/balances/${address}`)
         .then(_resJson)
         .then(balances => {
-          expect(balances['CRD']).toBe(100);
+          expect(balances['CRD']).toBeGreaterThanOrEqualTo(100);
         }),
     ]))
   });
@@ -542,6 +583,78 @@ describe('balances', () => {
           .then(_resJson)
           .then(balances => {
             expect(balances['ITEM:mint']).toBe(undefined);
+            expect(balances['ITEM.WOOD']).toBe(2);
+          }),
+      ]));
+  });
+
+  it('should get asset', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeGetMessage(address, 'ITEM.WOOD', 5)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(5);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
+            expect(balances['ITEM.WOOD']).toBe(5);
+          }),
+      ]));
+  });
+
+  it('should drop asset', () => {
+    return fetch(`http://${b.host}:${b.port}/submitMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(_makeMinterMessage('ITEM', privateKey)),
+    })
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeGetMessage(address, 'ITEM.WOOD', 5)),
+      }))
+      .then(_resJson)
+      .then(() => fetch(`http://${b.host}:${b.port}/submitMessage`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(_makeDropMessage(address, 'ITEM.WOOD', 3)),
+      }))
+      .then(_resJson)
+      .then(() => Promise.all([
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM:mint`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(1);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalance/${address}/ITEM.WOOD`)
+          .then(_resJson)
+          .then(balance => {
+            expect(balance).toBe(2);
+          }),
+        fetch(`http://${b.host}:${b.port}/unconfirmedBalances/${address}`)
+          .then(_resJson)
+          .then(balances => {
+            expect(balances['ITEM:mint']).toBe(1);
             expect(balances['ITEM.WOOD']).toBe(2);
           }),
       ]));
@@ -856,7 +969,7 @@ describe('peers', () => {
       ]));
   });
 
-  it.only('should sync mempool', () => {
+  it('should sync mempool', () => {
     return fetch(`http://${b1.host}:${b1.port}/submitMessage`, {
       method: 'POST',
       headers: jsonHeaders,
